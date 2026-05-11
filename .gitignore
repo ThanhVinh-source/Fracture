@@ -1,0 +1,19 @@
+
+# Generated outputs — never commit
+conformance_log.csv
+cluster_assignments.csv
+pipeline_registry.csv
+
+# Runtime directories — created by fracture register and run
+contracts/
+inputs/
+
+# Python build artifacts
+fracture.egg-info/
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Private strategy documents
+ING_PITCH.py
