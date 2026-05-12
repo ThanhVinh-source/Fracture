@@ -1,0 +1,33 @@
+# Fracture — Python dependencies
+# Install: pip install -r requirements.txt
+
+# ── Process mining ────────────────────────────────────────────────────────────
+pm4py>=2.7.0                # token replay, Petri nets, Inductive Miner, woflan
+
+# ── Data ─────────────────────────────────────────────────────────────────────
+pandas>=2.0.0               # event log processing, bilateral gap computation
+numpy>=1.24.0               # temporal feature computation, zone model
+pyarrow>=12.0.0             # parquet event files, Iceberg integration
+
+# ── Schema validation ─────────────────────────────────────────────────────────
+pydantic>=2.0.0             # contract validation (14 fields, 4 validators)
+pyyaml>=6.0                 # contract YAML read/write
+
+# ── Statistical analysis ──────────────────────────────────────────────────────
+scipy>=1.10.0               # Mann-Whitney U, KS test (hypothesis_test.py)
+scikit-learn>=1.3.0         # k-Means, DBSCAN, silhouette score (clustering.py)
+
+# ── Changepoint detection ─────────────────────────────────────────────────────
+ruptures>=1.1.7             # PELT algorithm for bilateral gap changepoint
+
+# ── Petri net visualisation ───────────────────────────────────────────────────
+graphviz>=0.20              # Petri net rendering (test_e2e_saturday.py PNG output)
+networkx>=3.0               # graph operations for Petri net structure
+
+# ── Upcoming: Iceberg + RBAC (May) ───────────────────────────────────────────
+# pyiceberg[sql-sqlite]>=0.6.0    # local SQLite catalog
+# duckdb>=0.9.0                   # SQL on Iceberg for report.py and clustering.py
+
+# ── Upcoming: XAI layer (June) ───────────────────────────────────────────────
+# shap>=0.44.0                    # SHAP values for cluster explainability
+# xgboost>=2.0.0                  # breach prediction (XGBoost + SHAP)
