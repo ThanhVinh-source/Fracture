@@ -17,3 +17,5 @@ __pycache__/
 
 # Private strategy documents
 ING_PITCH.py
+
+.DS_Store
