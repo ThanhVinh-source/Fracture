@@ -28,6 +28,19 @@ setup(
         'scipy',
         'scikit-learn',
         'pyarrow',
+
+        # Analytical extensions used by changepoint detection and graph analysis.
+        'ruptures',
+        'graphviz',
+        'networkx',
+
+        # Visualization/dashboard runtime for Phase 2+.
+        # Keeping these in setup.py makes `pip install -e .` usable for demos.
+        'streamlit',
+        'plotly',
+        'matplotlib',
+        'seaborn',
+
     ],
     entry_points={
         'console_scripts': [

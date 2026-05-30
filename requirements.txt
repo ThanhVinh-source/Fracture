@@ -24,10 +24,16 @@ ruptures>=1.1.7             # PELT algorithm for bilateral gap changepoint
 graphviz>=0.20              # Petri net rendering (test_e2e_saturday.py PNG output)
 networkx>=3.0               # graph operations for Petri net structure
 
-# ── Upcoming: Iceberg + RBAC (May) ───────────────────────────────────────────
+# ── Upcoming: Iceberg + RBAC  ───────────────────────────────────────────
 # pyiceberg[sql-sqlite]>=0.6.0    # local SQLite catalog
 # duckdb>=0.9.0                   # SQL on Iceberg for report.py and clustering.py
 
-# ── Upcoming: XAI layer (June) ───────────────────────────────────────────────
+# ── Upcoming: XAI layer ───────────────────────────────────────────────
 # shap>=0.44.0                    # SHAP values for cluster explainability
 # xgboost>=2.0.0                  # breach prediction (XGBoost + SHAP)
+
+# ── Dashboard + visualisation ────────────────────────────────────────────────
+streamlit>=1.30.0            # local interactive dashboard
+plotly>=5.18.0               # interactive timeline/drift charts
+matplotlib>=3.8.0            # static PNG/PDF exports
+seaborn>=0.13.0              # fleet heatmaps and summary plots

@@ -80,6 +80,19 @@ class LogContract(BaseModel):
         )
     )
 
+
+    # Some process steps are legitimate branches, not failures.
+    # Example: VALIDATED may run for full loads but be skipped for incremental loads.
+    # Petri net construction will add silent bypass arcs for these activities.
+    optional_activities: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Activities that may be legitimately skipped. "
+            "Fracture adds silent bypass arcs for these activities "
+            "in the contract-derived Petri net."
+        )
+    )
+
     terminal_event: str = Field(
         default="COMPLETED",
         description=(
@@ -218,6 +231,31 @@ class LogContract(BaseModel):
                 f"terminal_event '{v}' must be in required_events {required}."
             )
         return v
+    
+    @model_validator(mode="after")
+    # Validators are used to block incorrect contracts right from the moment they read the YAML code / create the object.
+    def validate_optional_activities(self):
+        # Optional activities only make sense if they exist in the process model.
+        # If an activity is not in required_events, there is no Petri net transition
+        # where Fracture can attach a bypass arc.
+        unknown = set(self.optional_activities) - set(self.required_events)
+        if unknown:
+            raise ValueError(
+                f"optional_activities must be in required_events. "
+                f"Unknown: {sorted(unknown)}"
+            )
+
+        # The terminal event drives completeness scoring.
+        # Making it optional can hide incomplete runs, so warn for V1 instead of
+        # failing hard to preserve compatibility with existing tests/demo cases.
+        if self.terminal_event in self.optional_activities:
+            warnings.warn(
+                f"terminal_event '{self.terminal_event}' is marked optional. "
+                "This can make completeness/conformance interpretation misleading.",
+                UserWarning,
+            )
+
+        return self
 
 
 # ── Main contract ─────────────────────────────────────────────────────────────
