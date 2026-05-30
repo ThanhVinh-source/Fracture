@@ -238,6 +238,38 @@ def validate_format(
     # This ensures downstream code always receives the expected schema
     return df[FRACTURE_COLUMNS].copy()
 
+def normalize_events(df: pd.DataFrame, contract) -> pd.DataFrame:
+    """
+    Normalize validated Fracture events before preflight and token replay.
+
+    This keeps raw extraction flexible while making the conformance engine
+    operate on contract vocabulary.
+    """
+    if df is None:
+        return None
+
+    normalized = df.copy()
+
+    # Teams can emit system-specific names, but token replay requires activity
+    # labels to match the contract's required_events exactly.
+    activity_map = contract.log_contract.activity_name_map or {}
+    if activity_map:
+        normalized["activity"] = normalized["activity"].replace(activity_map)
+
+    # Retries are operational noise when the contract cares about milestones.
+    # Keep the latest timestamp per run/activity so repeated Airflow task events
+    # do not look like extra process steps during token replay.
+    if contract.log_contract.deduplicate_retries:
+        # First group retries by milestone and keep the latest event, then
+        # restore timestamp order so PM4PY sees the real trace sequence.
+        normalized = (
+            normalized
+            .sort_values(["pipeline_run_id", "activity", "timestamp"])
+            .drop_duplicates(["pipeline_run_id", "activity"], keep="last")
+            .sort_values(["pipeline_run_id", "timestamp"])
+        )
+    return normalized[FRACTURE_COLUMNS].copy()
+
 
 # ── File loader ───────────────────────────────────────────────────────────────
 
