@@ -65,6 +65,32 @@ LOG_COLUMNS = [
     "timing_zone",
     "pattern",
     "bilateral_gap_minutes",
+
+    # Gap diagnostics for bilateral and chain handoff views.
+    # Empty cells mean the gap was unavailable or not computed.
+    "bilateral_gap_trend",
+    "bilateral_gap_p95",
+    "upstream_gap_minutes",
+    "upstream_gap_trend",
+    "upstream_gap_p95",
+    "downstream_gap_minutes",
+    "downstream_gap_trend",
+    "downstream_gap_p95",
+
+    # Historical score diagnostics for drift charts and fleet analytics.
+    # These are populated only when historical scores are available.
+    "temporal_variance_cv",
+    "drift_rate_per_day",
+    "score_range",
+    "gap_drift_per_day",
+    "mean_score_historical",
+    "min_score_historical",
+
+    # Root-cause diagnostics for dashboard annotations.
+    "changepoint_detected",
+    "changepoint_date",
+    "variant_explainer",
+
     "days_of_history",
     "sequence_fitness",
     "timing_score",
@@ -153,6 +179,28 @@ def _result_to_row(pipeline_id: str, key: str, result, run_date: str) -> dict:
             'timing_zone':           '',
             'pattern':               '',
             'bilateral_gap_minutes': '',
+
+            'bilateral_gap_trend':    '',
+            'bilateral_gap_p95':      '',
+            'upstream_gap_minutes':   '',
+            'upstream_gap_trend':     '',
+            'upstream_gap_p95':       '',
+            'downstream_gap_minutes': '',
+            'downstream_gap_trend':   '',
+            'downstream_gap_p95':     '',
+
+            'temporal_variance_cv':   '',
+            'drift_rate_per_day':     '',
+            'score_range':            '',
+            'gap_drift_per_day':      '',
+            'mean_score_historical':  '',
+            'min_score_historical':   '',
+
+            'changepoint_detected':   '',
+            'changepoint_date':       '',
+            'variant_explainer':      '',
+
+
             'days_of_history':       '',
             'sequence_fitness':      '',
             'timing_score':          '',
@@ -174,6 +222,28 @@ def _result_to_row(pipeline_id: str, key: str, result, run_date: str) -> dict:
         'pattern':               r.pattern,
         'bilateral_gap_minutes': round(r.bilateral_gap_minutes, 1)
                                  if r.bilateral_gap_minutes else '',
+        
+        'bilateral_gap_trend':    d.bilateral_gap_trend if d else '',
+        'bilateral_gap_p95':      _fmt_optional_float(d.bilateral_gap_p95, 1) if d else '',
+        'upstream_gap_minutes':   _fmt_optional_float(d.upstream_gap_minutes, 1) if d else '',
+        'upstream_gap_trend':     d.upstream_gap_trend if d else '',
+        'upstream_gap_p95':       _fmt_optional_float(d.upstream_gap_p95, 1) if d else '',
+        'downstream_gap_minutes': _fmt_optional_float(d.downstream_gap_minutes, 1) if d else '',
+        'downstream_gap_trend':   d.downstream_gap_trend if d else '',
+        'downstream_gap_p95':     _fmt_optional_float(d.downstream_gap_p95, 1) if d else '',
+
+        'temporal_variance_cv':   _fmt_optional_float(d.temporal_variance_cv, 4) if d else '',
+        'drift_rate_per_day':     _fmt_optional_float(d.drift_rate_per_day, 6) if d else '',
+        'score_range':            _fmt_optional_float(d.score_range, 4) if d else '',
+        'gap_drift_per_day':      _fmt_optional_float(d.gap_drift_per_day, 4) if d else '',
+        'mean_score_historical':  _fmt_optional_float(d.mean_score_historical, 4) if d else '',
+        'min_score_historical':   _fmt_optional_float(d.min_score_historical, 4) if d else '',
+        
+        'changepoint_detected':   bool(getattr(d.changepoint, 'detected', False)) if d else '',
+        'changepoint_date':       _first_changepoint_date(d.changepoint) if d else '',
+        'variant_explainer':      getattr(d.variant_comparison, 'fitness_explainer', '') if d and d.variant_comparison else '',
+
+
         'days_of_history':       r.days_of_history,
         'sequence_fitness':      round(d.sequence_fitness, 4) if d else '',
         'timing_score':          round(d.timing_score, 4) if d else '',
@@ -182,6 +252,30 @@ def _result_to_row(pipeline_id: str, key: str, result, run_date: str) -> dict:
         'alert_owner':           r.alert_owner(),
         'run_timestamp':         datetime.now().isoformat(),
     }
+
+
+def _fmt_optional_float(value, ndigits=4):
+    """
+    Format optional numeric diagnostics for conformance_log.csv.
+
+    Many dashboard fields are only available after enough history exists.
+    Empty string means "not computed"; it should not be confused with 0.
+    """
+    if value is None:
+        return ''
+    return round(value, ndigits)
+
+
+def _first_changepoint_date(changepoint):
+    """
+    Extract the first detected changepoint date for dashboard timelines.
+
+    Changepoint detection can be skipped when there is insufficient history.
+    In that case, write an empty CSV cell instead of a fake date.
+    """
+    if not changepoint or not getattr(changepoint, 'changepoint_dates', None):
+        return ''
+    return str(changepoint.changepoint_dates[0])
 
 
 # ── Key generation ────────────────────────────────────────────────────────────

@@ -20,6 +20,8 @@ from fracture.schema import LogContract, PipelineContract, Criticality, Contract
 from fracture.ingest import normalize_events
 from fracture.config import FractureConfig
 from fracture.conformance import compute_conformance
+from fracture.cli import LOG_COLUMNS, _result_to_row
+from fracture.engine import PipelineRunResult
 
 
 def make_contract(**log_updates):
@@ -187,6 +189,55 @@ def test_runtime_uses_contract_optional_activities_for_token_replay():
 
     assert result.diagnostics.sequence_fitness == 1.0
 
+def test_log_columns_include_visualization_ready_diagnostics():
+    expected = {
+        "bilateral_gap_trend",
+        "bilateral_gap_p95",
+        "upstream_gap_minutes",
+        "upstream_gap_trend",
+        "upstream_gap_p95",
+        "downstream_gap_minutes",
+        "downstream_gap_trend",
+        "downstream_gap_p95",
+        "temporal_variance_cv",
+        "drift_rate_per_day",
+        "score_range",
+        "gap_drift_per_day",
+        "mean_score_historical",
+        "min_score_historical",
+        "changepoint_detected",
+        "changepoint_date",
+        "variant_explainer",
+    }
+
+    assert expected.issubset(set(LOG_COLUMNS))
+
+def test_result_to_row_writes_empty_diagnostics_for_non_success():
+    result = PipelineRunResult(
+        pipeline_id="test_pipeline",
+        status="NO_INPUT",
+        error_message="missing input",
+    )
+
+    row = _result_to_row("test_pipeline", "", result, "20260101")
+
+    for column in [
+        "bilateral_gap_trend",
+        "bilateral_gap_p95",
+        "upstream_gap_minutes",
+        "downstream_gap_minutes",
+        "temporal_variance_cv",
+        "drift_rate_per_day",
+        "score_range",
+        "gap_drift_per_day",
+        "mean_score_historical",
+        "min_score_historical",
+        "changepoint_detected",
+        "changepoint_date",
+        "variant_explainer",
+    ]:
+        assert row[column] == ""
+
 if __name__ == "__main__":
     test_optional_activities_load_from_contract()
     print("v optional_activities load from contract")
@@ -208,5 +259,11 @@ if __name__ == "__main__":
 
     test_runtime_uses_contract_optional_activities_for_token_replay()
     print("v runtime uses contract optional_activities for token replay")
+
+    test_log_columns_include_visualization_ready_diagnostics()
+    print("v log columns include visualization-ready diagnostics")
+
+    test_result_to_row_writes_empty_diagnostics_for_non_success()
+    print("v non-success rows write empty diagnostic fields")
 
     print("\nPhase 1 core readiness tests passed.")
