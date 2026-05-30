@@ -39,7 +39,13 @@ def contract_to_petri_net(
     """
     pid       = contract.pipeline_id
     activities = contract.log_contract.required_events
-    optionals  = set(optional_activities or [])
+    # Explicit argument keeps old tests/helpers working.
+    # Normal runtime uses optional_activities declared in the contract YAML.
+    optionals = set(
+        optional_activities
+        if optional_activities is not None
+        else contract.log_contract.optional_activities
+    )
     net = PetriNet(f"fracture_net_{pid}")
 
     # Places: p_start + one intermediate per activity + p_end

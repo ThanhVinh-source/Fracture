@@ -16,8 +16,10 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 import pytest
 
-from fracture.schema import LogContract, PipelineContract, Criticality
+from fracture.schema import LogContract, PipelineContract, Criticality, ContractStatus
 from fracture.ingest import normalize_events
+from fracture.config import FractureConfig
+from fracture.conformance import compute_conformance
 
 
 def make_contract(**log_updates):
@@ -44,12 +46,22 @@ def make_contract(**log_updates):
         expected_start="06:00",
         expected_end="08:00",
         criticality=Criticality.MEDIUM,
+        status=ContractStatus.ACTIVE,
         grace_minutes=30,
         p50_minutes=45,
         p95_minutes=60,
         p99_minutes=75,
         log_contract=LogContract(**log_data),
+
     )
+
+def make_mapped_runtime_events():
+    base = datetime(2026, 1, 1, 6, 0, tzinfo=timezone.utc)
+    return pd.DataFrame([
+        {"pipeline_run_id": "run_1", "activity": "job_scheduled", "timestamp": base, "team": "producer"},
+        {"pipeline_run_id": "run_1", "activity": "job_started", "timestamp": base + timedelta(minutes=1), "team": "producer"},
+        {"pipeline_run_id": "run_1", "activity": "job_done", "timestamp": base + timedelta(minutes=40), "team": "producer"},
+    ])
 
 
 def test_optional_activities_load_from_contract():
@@ -137,20 +149,64 @@ def test_deduplicate_retries_keeps_latest_duplicate_activity():
         base + timedelta(minutes=2)
     )
 
+def test_runtime_applies_activity_name_map_before_token_replay():
+    contract = make_contract(
+        required_events=["SCHEDULED", "STARTED", "COMPLETED"],
+        terminal_event="COMPLETED",
+        activity_name_map={
+            "job_scheduled": "SCHEDULED",
+            "job_started": "STARTED",
+            "job_done": "COMPLETED",
+        },
+    )
+
+    result = compute_conformance(
+        producer_events=make_mapped_runtime_events(),
+        contract=contract,
+        config=FractureConfig(),
+    )
+
+    assert result.diagnostics.sequence_fitness == 1.0
+
+def test_runtime_uses_contract_optional_activities_for_token_replay():
+    base = datetime(2026, 1, 1, 6, 0, tzinfo=timezone.utc)
+    events = pd.DataFrame([
+        {"pipeline_run_id": "run_1", "activity": "SCHEDULED", "timestamp": base, "team": "producer"},
+        {"pipeline_run_id": "run_1", "activity": "STARTED", "timestamp": base + timedelta(minutes=1), "team": "producer"},
+        {"pipeline_run_id": "run_1", "activity": "COMPLETED", "timestamp": base + timedelta(minutes=40), "team": "producer"},
+        {"pipeline_run_id": "run_1", "activity": "DATA_AVAILABLE", "timestamp": base + timedelta(minutes=42), "team": "producer"},
+    ])
+
+    contract = make_contract(optional_activities=["VALIDATED"])
+
+    result = compute_conformance(
+        producer_events=events,
+        contract=contract,
+        config=FractureConfig(),
+    )
+
+    assert result.diagnostics.sequence_fitness == 1.0
+
 if __name__ == "__main__":
     test_optional_activities_load_from_contract()
-    print("✓ optional_activities load from contract")
+    print("v optional_activities load from contract")
 
     test_optional_activity_must_exist_in_required_events()
-    print("✓ optional activity must exist in required_events")
+    print("v optional activity must exist in required_events")
 
     test_terminal_optional_activity_warns()
-    print("✓ terminal optional activity warns")
+    print("v terminal optional activity warns")
     
     test_activity_name_map_normalizes_raw_activity_names()
-    print("✓ activity_name_map normalizes raw activity names")
+    print("v activity_name_map normalizes raw activity names")
 
     test_deduplicate_retries_keeps_latest_duplicate_activity()
-    print("✓ deduplicate_retries keeps latest duplicate activity")
+    print("v deduplicate_retries keeps latest duplicate activity")
+
+    test_runtime_applies_activity_name_map_before_token_replay()
+    print("v runtime applies activity_name_map before token replay")
+
+    test_runtime_uses_contract_optional_activities_for_token_replay()
+    print("v runtime uses contract optional_activities for token replay")
 
     print("\nPhase 1 core readiness tests passed.")

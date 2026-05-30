@@ -40,6 +40,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional
 
+from fracture.ingest import normalize_events
+
+
 import numpy as np
 import pandas as pd
 from scipy.stats import linregress
@@ -1357,6 +1360,13 @@ def compute_conformance(
     - Data quality conformance (if DataQualityContract present)
     - Attribution (which team owns the failure)
     """
+
+    # Normalize raw event names and retry noise before any quality gates.
+    # Preflight, token replay, timing, completeness, and bilateral gap must all
+    # operate on the same contract vocabulary.
+    producer_events = normalize_events(producer_events, contract)
+    if consumer_events is not None:
+        consumer_events = normalize_events(consumer_events, contract)    
 
     # ── Step 1: Preflight checks (traffic light severity) ────
     #
