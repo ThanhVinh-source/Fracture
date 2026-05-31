@@ -1650,10 +1650,6 @@ def _print_result_full(result):
         if hasattr(result, 'error_message') and result.error_message:
             print(f"  {result.error_message[:100]}")
 
-
-# ── Main ──────────────────────────────────────────────────────────────────────
-
-
 def _ensure_in_registry(pipeline_id, key, owner, producer_team,
                          consumer_team, contracts_dir):
     """Add pipeline to registry if not already there."""
@@ -1683,6 +1679,96 @@ def cmd_bootstrap_contract(pipeline_id: str, inputs_dir: str = 'inputs',
     except Exception as e:
         print(f"  bootstrap failed: {e}")
         return 1
+    
+def cmd_visualize(args):
+    """
+    Export static visualization artifacts for one pipeline.
+
+    V1 supports the bilateral gap timeline. Other visualization kinds are
+    reserved for later phases so the CLI can grow without changing its shape.
+    """
+    pipeline_id = _resolve_pipeline(args)
+    if not pipeline_id:
+        return 1
+
+    kind = args.kind or "gap"
+
+    # Keep the CLI shape future-proof, but only implement the first visual now.
+    # `all` currently means "run all visuals implemented so far", which is gap.
+    if kind not in ("gap", "all"):
+        print()
+        print(f"  Visualization kind '{kind}' is not implemented yet.")
+        print("  Available in this build: gap")
+        return 1
+
+    from fracture.visualization import (
+        load_pipeline_events,
+        save_bilateral_gap_timeline,
+    )
+
+    producer_event = "DATA_AVAILABLE"
+    consumer_event = "DATA_AVAILABLE"
+
+    # If a contract exists, use its configured handoff event names.
+    # This keeps the visualization aligned with middle-pipeline/custom contracts.
+    contract_path = Path(args.contracts_dir) / f"{pipeline_id}.yaml"
+    if contract_path.exists():
+        try:
+            from fracture.schema import load_contract
+            contract = load_contract(str(contract_path))
+            producer_event = contract.log_contract.upstream_producer_event
+            consumer_event = contract.log_contract.upstream_consumer_event
+        except Exception as e:
+            # Visualization can still run with default DATA_AVAILABLE markers.
+            # A bad contract should be visible, but should not hide valid logs.
+            print()
+            print(f"  Warning: could not read contract events, using defaults: {e}")
+
+    print()
+    print(f"  Visualizing: {pipeline_id}")
+    print(f"  Kind       : {kind}")
+    print(f"  Date       : {args.date or 'today'}")
+
+    producer_df, consumer_df, load_status = load_pipeline_events(
+        inputs_dir=args.inputs_dir,
+        pipeline_id=pipeline_id,
+        date_str=args.date,
+    )
+
+    if producer_df.empty:
+        # No producer log means there is no source timeline to draw.
+        print()
+        print(f"  Cannot create visualization: {load_status}")
+        return 1
+
+    if consumer_df is None:
+        # The bilateral gap requires both sides of the handoff.
+        # Producer-only logs are valid for conformance, but not for this visual.
+        print()
+        print("  Cannot create bilateral gap timeline: consumer log unavailable.")
+        print("  Add inputs/{pipeline_id}/consumer_YYYYMMDD.csv or parquet.")
+        return 1
+
+    output_path, status = save_bilateral_gap_timeline(
+        producer_df=producer_df,
+        consumer_df=consumer_df,
+        pipeline_id=pipeline_id,
+        output_dir=args.output_dir,
+        producer_event=producer_event,
+        consumer_event=consumer_event,
+    )
+
+    if status != "ok":
+        # Return a clear status instead of creating a misleading empty image.
+        print()
+        print(f"  Visualization skipped: {status}")
+        return 1
+
+    print()
+    print(f"  Saved -> {output_path}")
+    return 0
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
@@ -1767,6 +1853,22 @@ primary key:
     p_stat.add_argument('--key',         default=None)
     p_stat.add_argument('--pipeline-id', default=None, dest='pipeline_id')
 
+    # visualize
+    p_viz = sub.add_parser(
+        'visualize',
+        help='Export static visualizations for one pipeline'
+    )
+    p_viz.add_argument('--key', default=None,
+                       help='Pipeline key FRC-xxxxxxxx')
+    p_viz.add_argument('--pipeline-id', default=None, dest='pipeline_id')
+    p_viz.add_argument('--date', default=None,
+                       help='YYYYMMDD input date to visualize')
+    p_viz.add_argument('--kind', default='gap',
+                       choices=['gap', 'all', 'petri', 'drift', 'dfg', 'heatmap'],
+                       help='Visualization kind. V1 implements gap only.')
+    p_viz.add_argument('--output-dir', default='outputs/visualizations',
+                       help='Where visualization files are written')
+
     # delete
     p_del = sub.add_parser('delete', help='Delete a run entry')
     p_del.add_argument('--pipeline-id', required=True, dest='pipeline_id')
@@ -1819,6 +1921,7 @@ primary key:
         'validate':  cmd_validate,
         'template':  cmd_template,
         'status':    cmd_status,
+        'visualize': cmd_visualize,
         'delete':    cmd_delete,
         'log':       cmd_log,
         'deprecate':   cmd_deprecate,

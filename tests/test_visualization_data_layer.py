@@ -14,6 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
+from argparse import Namespace
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -30,6 +31,7 @@ from fracture.visualization import (
     compute_bilateral_gap_points,
     save_bilateral_gap_timeline,
 )
+from fracture.cli import cmd_visualize
 
 
 passed = 0
@@ -367,6 +369,95 @@ def test_save_bilateral_gap_timeline_writes_png():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+def test_cmd_visualize_gap_writes_png_from_input_files():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        inputs_dir = tmp / "inputs"
+        output_dir = tmp / "outputs" / "visualizations"
+        pipeline_dir = inputs_dir / "payment_batch"
+        pipeline_dir.mkdir(parents=True)
+
+        producer_df, consumer_df = make_bilateral_gap_events()
+
+        # The CLI loads the same input layout as a real Fracture run.
+        producer_df.to_parquet(pipeline_dir / "producer_20260531.parquet")
+        consumer_df.to_parquet(pipeline_dir / "consumer_20260531.parquet")
+
+        args = Namespace(
+            key=None,
+            pipeline_id="payment_batch",
+            date="20260531",
+            kind="gap",
+            inputs_dir=str(inputs_dir),
+            contracts_dir=str(tmp / "contracts"),
+            output_dir=str(output_dir),
+        )
+
+        exit_code = cmd_visualize(args)
+
+        expected_path = (
+            output_dir / "payment_batch" / "bilateral_gap_timeline.png"
+        )
+
+        assert exit_code == 0
+        assert expected_path.exists()
+        assert expected_path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_cmd_visualize_all_runs_gap_visual_for_now():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        inputs_dir = tmp / "inputs"
+        output_dir = tmp / "outputs" / "visualizations"
+        pipeline_dir = inputs_dir / "payment_batch"
+        pipeline_dir.mkdir(parents=True)
+
+        producer_df, consumer_df = make_bilateral_gap_events()
+
+        # `all` means every implemented visual. At this stage, only gap exists.
+        producer_df.to_parquet(pipeline_dir / "producer_20260531.parquet")
+        consumer_df.to_parquet(pipeline_dir / "consumer_20260531.parquet")
+
+        args = Namespace(
+            key=None,
+            pipeline_id="payment_batch",
+            date="20260531",
+            kind="all",
+            inputs_dir=str(inputs_dir),
+            contracts_dir=str(tmp / "contracts"),
+            output_dir=str(output_dir),
+        )
+
+        exit_code = cmd_visualize(args)
+
+        expected_path = (
+            output_dir / "payment_batch" / "bilateral_gap_timeline.png"
+        )
+
+        assert exit_code == 0
+        assert expected_path.exists()
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_cmd_visualize_rejects_unimplemented_kind():
+    args = Namespace(
+        key=None,
+        pipeline_id="payment_batch",
+        date="20260531",
+        kind="petri",
+        inputs_dir="inputs",
+        contracts_dir="contracts",
+        output_dir="outputs/visualizations",
+    )
+
+    # Petri/drift/dfg are planned, but V1 only implements gap.
+    assert cmd_visualize(args) == 1
+
 
 if __name__ == "__main__":
     print()
@@ -399,6 +490,12 @@ if __name__ == "__main__":
           test_compute_bilateral_gap_points_handles_producer_only_mode)
     check("save_bilateral_gap_timeline writes PNG",
           test_save_bilateral_gap_timeline_writes_png)
+    check("cmd_visualize gap writes PNG from input files",
+          test_cmd_visualize_gap_writes_png_from_input_files)
+    check("cmd_visualize all runs implemented visuals",
+          test_cmd_visualize_all_runs_gap_visual_for_now)
+    check("cmd_visualize rejects unimplemented kind",
+          test_cmd_visualize_rejects_unimplemented_kind)
 
     print()
     print(f"Results: {passed + failed} tests  v {passed}  x {failed}")
