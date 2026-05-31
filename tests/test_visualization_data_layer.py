@@ -26,6 +26,7 @@ from fracture.visualization import (
     load_conformance_log,
     load_contracts,
     load_pipeline_events,
+    load_cluster_assignments,
 )
 
 
@@ -189,6 +190,105 @@ def test_load_pipeline_events_producer_only_mode():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+def test_load_contracts_reads_valid_contract_yaml():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        contracts_dir = tmp / "contracts"
+        contracts_dir.mkdir(parents=True)
+
+        # This YAML mirrors a real registered pipeline contract.
+        # The visualization loader should turn it into one dashboard row.
+        contract_yaml = """
+pipeline_id: payment_batch
+owner: owner@example.com
+producer_team: payments-platform
+consumer_team: settlement-ops
+expected_start: "06:00"
+expected_end: "08:00"
+grace_minutes: 30
+p50_minutes: 45
+p95_minutes: 60
+p99_minutes: 75
+criticality: medium
+status: active
+log_contract:
+  transport: parquet
+  source_path: inputs/payment_batch/
+  required_events:
+    - SCHEDULED
+    - STARTED
+    - VALIDATED
+    - COMPLETED
+    - DATA_AVAILABLE
+  optional_activities:
+    - VALIDATED
+  terminal_event: COMPLETED
+  activity_name_map: {}
+  grain: pipeline
+  deduplicate_retries: false
+"""
+        (contracts_dir / "payment_batch.yaml").write_text(contract_yaml)
+
+        df, status = load_contracts(str(contracts_dir))
+
+        assert status == "ok"
+        assert len(df) == 1
+        assert df.loc[0, "pipeline_id"] == "payment_batch"
+        assert df.loc[0, "owner"] == "owner@example.com"
+        assert df.loc[0, "status"] == "active"
+
+        # These string fields are prepared for dashboard tables.
+        assert "SCHEDULED" in df.loc[0, "required_events"]
+        assert "VALIDATED" in df.loc[0, "optional_activities"]
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+def test_load_cluster_assignments_missing_file_returns_empty_dataframe():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        cluster_path = tmp / "cluster_assignments.csv"
+
+        df, status = load_cluster_assignments(str(cluster_path))
+
+        assert df.empty
+        assert "Missing cluster assignments" in status
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        
+def test_load_cluster_assignments_reads_existing_csv():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        cluster_path = tmp / "cluster_assignments.csv"
+
+        # Minimal cluster output expected from clustering.py.
+        # Future Fleet Overview charts can use this for colors and grouping.
+        pd.DataFrame([
+            {
+                "pipeline_id": "payment_batch",
+                "cluster": "HEALTHY",
+                "final_score": 1.02,
+                "bilateral_gap_minutes": 4.8,
+            },
+            {
+                "pipeline_id": "risk_report",
+                "cluster": "DRIFTING",
+                "final_score": 0.81,
+                "bilateral_gap_minutes": 28.5,
+            },
+        ]).to_csv(cluster_path, index=False)
+
+        df, status = load_cluster_assignments(str(cluster_path))
+
+        assert status == "ok"
+        assert len(df) == 2
+        assert df.loc[0, "pipeline_id"] == "payment_batch"
+        assert set(df["cluster"]) == {"HEALTHY", "DRIFTING"}
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     print()
@@ -209,6 +309,12 @@ if __name__ == "__main__":
           test_load_pipeline_events_missing_pipeline_returns_empty_state)
     check("load_pipeline_events supports producer-only mode",
           test_load_pipeline_events_producer_only_mode)
+    check("load_contracts reads valid contract YAML",
+          test_load_contracts_reads_valid_contract_yaml)
+    check("load_cluster_assignments missing file returns empty DataFrame",
+          test_load_cluster_assignments_missing_file_returns_empty_dataframe)
+    check("load_cluster_assignments reads existing CSV",
+          test_load_cluster_assignments_reads_existing_csv)
 
     print()
     print(f"Results: {passed + failed} tests  v {passed}  x {failed}")

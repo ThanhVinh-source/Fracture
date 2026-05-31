@@ -144,3 +144,27 @@ def load_pipeline_events(
     except ValueError as e:
         # Bad event format should be displayed as a data-quality/setup issue.
         return pd.DataFrame(), None, f"invalid_input: {e}"
+    
+def load_cluster_assignments(
+    cluster_path: str = "cluster_assignments.csv",
+) -> tuple[pd.DataFrame, str]:
+    """
+    Load optional cluster assignments for Fleet Overview visualizations.
+
+    Clustering is not required for Fracture to run. If the file is missing,
+    dashboards should still load and simply hide cluster-specific charts.
+    """
+    path = Path(cluster_path)
+
+    if not path.exists():
+        # Empty state: clustering has not been generated yet.
+        # This should not block the Fleet Overview dashboard.
+        return pd.DataFrame(), f"Missing cluster assignments: {path}"
+
+    try:
+        df = pd.read_csv(path)
+    except Exception as e:
+        # A corrupt optional cluster file should not crash visualization pages.
+        return pd.DataFrame(), f"Could not read cluster assignments: {e}"
+
+    return df, "ok"
