@@ -63,8 +63,12 @@ def load_conformance_log(
         return pd.DataFrame(), f"Could not read conformance log: {e}"
     
     if "run_date" in df.columns:
-        # Keep original value if parsing fails; charts can still show raw rows.
-        df["run_date"] = pd.to_datetime(df["run_date"], errors="ignore")
+        # Parse run_date for charts when possible.
+        # If parsing fails, keep the original values so raw tables still work.
+        try:
+            df["run_date"] = pd.to_datetime(df["run_date"])
+        except Exception:
+            pass
     
     return df, "ok"
 
