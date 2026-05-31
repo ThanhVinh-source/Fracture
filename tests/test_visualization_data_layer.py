@@ -27,6 +27,8 @@ from fracture.visualization import (
     load_contracts,
     load_pipeline_events,
     load_cluster_assignments,
+    compute_bilateral_gap_points,
+    save_bilateral_gap_timeline,
 )
 
 
@@ -289,6 +291,82 @@ def test_load_cluster_assignments_reads_existing_csv():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+def make_bilateral_gap_events():
+    base = datetime(2026, 5, 31, 6, 0, tzinfo=timezone.utc)
+
+    producer_df = pd.DataFrame([
+        {
+            "pipeline_run_id": "run_1",
+            "activity": "DATA_AVAILABLE",
+            "timestamp": base + pd.Timedelta(minutes=50),
+            "team": "producer",
+        },
+        {
+            "pipeline_run_id": "run_2",
+            "activity": "DATA_AVAILABLE",
+            "timestamp": base + pd.Timedelta(minutes=55),
+            "team": "producer",
+        },
+    ])
+
+    consumer_df = pd.DataFrame([
+        {
+            "pipeline_run_id": "run_1",
+            "activity": "DATA_AVAILABLE",
+            "timestamp": base + pd.Timedelta(minutes=78),
+            "team": "consumer",
+        },
+        {
+            "pipeline_run_id": "run_2",
+            "activity": "DATA_AVAILABLE",
+            "timestamp": base + pd.Timedelta(minutes=85),
+            "team": "consumer",
+        },
+    ])
+
+    return producer_df, consumer_df
+
+def test_compute_bilateral_gap_points_returns_matched_gaps():
+    producer_df, consumer_df = make_bilateral_gap_events()
+
+    gap_df, status = compute_bilateral_gap_points(producer_df, consumer_df)
+
+    assert status == "ok"
+    assert len(gap_df) == 2
+    assert gap_df.loc[0, "gap_minutes"] == 28.0
+    assert gap_df.loc[1, "gap_minutes"] == 30.0
+
+
+def test_compute_bilateral_gap_points_handles_producer_only_mode():
+    producer_df, _ = make_bilateral_gap_events()
+
+    gap_df, status = compute_bilateral_gap_points(producer_df, None)
+
+    assert gap_df.empty
+    assert status == "producer_only"
+
+
+def test_save_bilateral_gap_timeline_writes_png():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        producer_df, consumer_df = make_bilateral_gap_events()
+
+        path, status = save_bilateral_gap_timeline(
+            producer_df=producer_df,
+            consumer_df=consumer_df,
+            pipeline_id="payment_batch",
+            output_dir=str(tmp / "outputs" / "visualizations"),
+        )
+
+        assert status == "ok"
+        assert path is not None
+        assert path.exists()
+        assert path.suffix == ".png"
+        assert path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     print()
@@ -315,6 +393,12 @@ if __name__ == "__main__":
           test_load_cluster_assignments_missing_file_returns_empty_dataframe)
     check("load_cluster_assignments reads existing CSV",
           test_load_cluster_assignments_reads_existing_csv)
+    check("compute_bilateral_gap_points returns matched gaps",
+          test_compute_bilateral_gap_points_returns_matched_gaps)
+    check("compute_bilateral_gap_points handles producer-only mode",
+          test_compute_bilateral_gap_points_handles_producer_only_mode)
+    check("save_bilateral_gap_timeline writes PNG",
+          test_save_bilateral_gap_timeline_writes_png)
 
     print()
     print(f"Results: {passed + failed} tests  v {passed}  x {failed}")

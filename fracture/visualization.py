@@ -19,6 +19,7 @@ from typing import Optional
 
 import pandas as pd
 import yaml
+import matplotlib.pyplot as plt
 
 from fracture.ingest import load_pipeline_events as ingest_load_pipeline_events
 from fracture.schema import load_contract
@@ -172,3 +173,162 @@ def load_cluster_assignments(
         return pd.DataFrame(), f"Could not read cluster assignments: {e}"
 
     return df, "ok"
+
+def compute_bilateral_gap_points(
+    producer_df: pd.DataFrame,
+    consumer_df: Optional[pd.DataFrame],
+    producer_event: str = "DATA_AVAILABLE",
+    consumer_event: str = "DATA_AVAILABLE",
+) -> tuple[pd.DataFrame, str]:
+    """
+    Build matched producer-consumer handoff points for the gap timeline.
+
+    Each output row represents one pipeline_run_id where both sides emitted
+    the handoff event. Producer-only mode returns an empty DataFrame with a
+    clear status so visual code can show a friendly message.
+    """
+    if producer_df is None or producer_df.empty:
+        # Without producer handoff events there is no anchor for the timeline.
+        return pd.DataFrame(), "missing_producer_events"
+
+    if consumer_df is None or consumer_df.empty:
+        # Producer-only mode is valid, but the bilateral gap is unknown.
+        return pd.DataFrame(), "producer_only"
+
+    producer_points = producer_df[producer_df["activity"] == producer_event].copy()
+    consumer_points = consumer_df[consumer_df["activity"] == consumer_event].copy()
+
+    if producer_points.empty:
+        # The expected handoff marker is missing from producer logs.
+        return pd.DataFrame(), f"missing_producer_event:{producer_event}"
+
+    if consumer_points.empty:
+        # The expected consumer acknowledgement marker is missing.
+        return pd.DataFrame(), f"missing_consumer_event:{consumer_event}"
+
+    producer_points = producer_points[["pipeline_run_id", "timestamp"]].rename(
+        columns={"timestamp": "producer_timestamp"}
+    )
+    consumer_points = consumer_points[["pipeline_run_id", "timestamp"]].rename(
+        columns={"timestamp": "consumer_timestamp"}
+    )
+
+    # Inner join keeps only runs where both producer and consumer emitted the
+    # handoff marker. Unmatched runs are useful later, but the first timeline
+    # should show confirmed bilateral gaps only.
+    matched = producer_points.merge(
+        consumer_points,
+        on="pipeline_run_id",
+        how="inner",
+    )
+
+    if matched.empty:
+        return pd.DataFrame(), "no_matched_handoff_events"
+
+    matched["producer_timestamp"] = pd.to_datetime(
+        matched["producer_timestamp"], utc=True
+    )
+    matched["consumer_timestamp"] = pd.to_datetime(
+        matched["consumer_timestamp"], utc=True
+    )
+
+    matched["gap_minutes"] = (
+        matched["consumer_timestamp"] - matched["producer_timestamp"]
+    ).dt.total_seconds() / 60.0
+
+    matched = matched.sort_values("producer_timestamp").reset_index(drop=True)
+
+    return matched, "ok"
+
+def save_bilateral_gap_timeline(
+    producer_df: pd.DataFrame,
+    consumer_df: Optional[pd.DataFrame],
+    pipeline_id: str,
+    output_dir: str = "outputs/visualizations",
+    producer_event: str = "DATA_AVAILABLE",
+    consumer_event: str = "DATA_AVAILABLE",
+) -> tuple[Optional[Path], str]:
+    """
+    Save a static bilateral gap timeline PNG for one pipeline.
+
+    The chart shows producer handoff timestamps, consumer acknowledgement
+    timestamps, and the waiting gap between them.
+    """
+    gap_df, status = compute_bilateral_gap_points(
+        producer_df=producer_df,
+        consumer_df=consumer_df,
+        producer_event=producer_event,
+        consumer_event=consumer_event,
+    )
+
+    if status != "ok":
+        # Do not create misleading empty images. Return the status so CLI or
+        # dashboard code can explain why the timeline is unavailable.
+        return None, status
+
+    output_path = ensure_visualization_dir(
+        pipeline_id=pipeline_id,
+        output_dir=output_dir,
+    ) / "bilateral_gap_timeline.png"
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    y_positions = range(len(gap_df))
+
+    # Horizontal lines make the waiting time visually obvious.
+    ax.hlines(
+        y=y_positions,
+        xmin=gap_df["producer_timestamp"],
+        xmax=gap_df["consumer_timestamp"],
+        color="#d97706",
+        linewidth=2,
+        label="handoff gap",
+    )
+
+    # Producer marker: when the upstream side says data is available.
+    ax.scatter(
+        gap_df["producer_timestamp"],
+        y_positions,
+        color="#2563eb",
+        s=40,
+        label="producer DATA_AVAILABLE",
+        zorder=3,
+    )
+
+    # Consumer marker: when the downstream side actually receives it.
+    ax.scatter(
+        gap_df["consumer_timestamp"],
+        y_positions,
+        color="#dc2626",
+        s=40,
+        label="consumer DATA_AVAILABLE",
+        zorder=3,
+    )
+
+    # Annotate only a manageable number of points to avoid unreadable images.
+    max_annotations = min(len(gap_df), 12)
+    for idx in range(max_annotations):
+        row = gap_df.iloc[idx]
+        ax.text(
+            row["consumer_timestamp"],
+            idx,
+            f" {row['gap_minutes']:.1f}m",
+            va="center",
+            fontsize=8,
+            color="#7f1d1d",
+        )
+
+    ax.set_title(f"Bilateral Gap Timeline — {pipeline_id}")
+    ax.set_xlabel("Timestamp")
+    ax.set_ylabel("Pipeline run")
+    ax.set_yticks(list(y_positions))
+    ax.set_yticklabels(gap_df["pipeline_run_id"].astype(str).tolist())
+    ax.grid(axis="x", linestyle="--", alpha=0.3)
+    ax.legend(loc="best")
+    fig.autofmt_xdate()
+    fig.tight_layout()
+
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+    return output_path, "ok"
