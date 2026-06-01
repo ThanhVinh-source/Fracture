@@ -77,6 +77,67 @@ def _parse_run_date_series(values: pd.Series) -> pd.Series:
 
     return parsed
 
+def _is_truthy_changepoint(value) -> bool:
+    """
+    Convert changepoint flags from CSV/object values into a real boolean.
+
+    conformance_log.csv may store booleans as True/False, "True"/"False",
+    1/0, or empty strings depending on how pandas reads the file.
+    """
+    if pd.isna(value):
+        # Empty CSV cells mean no changepoint evidence.
+        return False
+
+    if isinstance(value, bool):
+        # Already a real Python boolean.
+        return value
+
+    # Normalize text values from CSV before checking them.
+    text = str(value).strip().lower()
+
+    return text in {"true", "1", "yes", "y"}
+
+
+def extract_changepoint_dates(history: pd.DataFrame) -> list[pd.Timestamp]:
+    """
+    Extract changepoint dates from a prepared drift history DataFrame.
+
+    Drift charts should still work when older conformance logs do not contain
+    changepoint columns, so this helper returns an empty list in that case.
+    """
+    required_columns = {"changepoint_detected", "changepoint_date"}
+
+    if not required_columns.issubset(history.columns):
+        # Backward compatibility: old logs do not have changepoint fields.
+        return []
+
+    # Keep only rows where Fracture explicitly detected a changepoint.
+    flagged = history[
+        history["changepoint_detected"].apply(_is_truthy_changepoint)
+    ].copy()
+
+    if flagged.empty:
+        # No detected changepoints for this pipeline history.
+        return []
+
+    # Parse the stored changepoint_date values using the same safe date parser
+    # as run_date, because dates may be stored as YYYYMMDD or YYYY-MM-DD.
+    parsed_dates = _parse_run_date_series(flagged["changepoint_date"])
+
+    # Drop invalid/empty dates so one bad row does not break the chart.
+    parsed_dates = parsed_dates.dropna()
+
+    if parsed_dates.empty:
+        return []
+
+    # De-duplicate and sort dates so repeated log rows do not draw duplicate lines.
+    unique_dates = sorted({
+        pd.Timestamp(date).normalize()
+        for date in parsed_dates
+    })
+
+    return unique_dates
+
 def load_conformance_log(
         log_path: str = "conformance_log.csv",
 ) -> tuple[pd.DataFrame, str]:
@@ -455,7 +516,48 @@ def save_drift_chart(
         label="final_score",
     )
 
+    # Changepoint markers show when Fracture detected a sudden behavior shift.
+    # The detection itself comes from the analytical layer using ruptures;
+    # this visualization only reads the persisted CSV diagnostics.
+    changepoint_dates = extract_changepoint_dates(history)
+
+    # Only draw changepoints that fall inside the plotted history window.
+    # This avoids expanding the x-axis because of a stale or malformed date.
+    run_min = history["run_date"].min()
+    run_max = history["run_date"].max()
+    visible_changepoints = [
+        date for date in changepoint_dates
+        if run_min <= date <= run_max
+    ]
+
+    for idx, changepoint_date in enumerate(visible_changepoints):
+        # Draw one vertical line per detected process behavior change.
+        ax.axvline(
+            changepoint_date,
+            color="#dc2626",
+            linestyle=":",
+            linewidth=2,
+            label="changepoint" if idx == 0 else None,
+        )
+
+        # Label the line directly on the chart so it is readable in exported PNGs.
+        ax.text(
+            changepoint_date,
+            y_max * 0.98,
+            " changepoint",
+            rotation=90,
+            va="top",
+            ha="left",
+            fontsize=8,
+            color="#991b1b",
+        )
+
     summary_lines = [f"Runs: {len(history)}"]
+
+    if visible_changepoints:
+        # Summary box should explain that the vertical marker is meaningful.
+        latest_changepoint = visible_changepoints[-1].date()
+        summary_lines.append(f"Changepoint: {latest_changepoint}")
 
     if len(history) >= 2:
         # Fit a simple linear trend over run order.

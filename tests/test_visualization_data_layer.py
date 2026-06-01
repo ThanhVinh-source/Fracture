@@ -32,6 +32,7 @@ from fracture.visualization import (
     save_bilateral_gap_timeline,
     prepare_drift_history,
     save_drift_chart,
+    extract_changepoint_dates,
 )
 from fracture.cli import cmd_visualize
 
@@ -481,6 +482,39 @@ def make_drift_history():
         {"pipeline_id": "other_pipeline", "run_date": "20260504", "final_score": 1.00},
     ])
 
+def make_changepoint_drift_history():
+    # Minimal conformance_log-like data with one detected changepoint.
+    # This simulates the analytical layer persisting ruptures output into CSV.
+    return pd.DataFrame([
+        {
+            "pipeline_id": "payment_batch",
+            "run_date": "20260501",
+            "final_score": 0.98,
+            "changepoint_detected": False,
+            "changepoint_date": "",
+        },
+        {
+            "pipeline_id": "payment_batch",
+            "run_date": "20260502",
+            "final_score": 0.96,
+            "changepoint_detected": False,
+            "changepoint_date": "",
+        },
+        {
+            "pipeline_id": "payment_batch",
+            "run_date": "20260503",
+            "final_score": 0.88,
+            "changepoint_detected": True,
+            "changepoint_date": "20260503",
+        },
+        {
+            "pipeline_id": "payment_batch",
+            "run_date": "20260504",
+            "final_score": 0.82,
+            "changepoint_detected": True,
+            "changepoint_date": "20260503",
+        },
+    ])
 
 def test_prepare_drift_history_filters_pipeline_and_scores():
     history, status = prepare_drift_history(
@@ -544,6 +578,39 @@ def test_cmd_visualize_drift_writes_png_from_conformance_log():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+def test_extract_changepoint_dates_deduplicates_detected_dates():
+    history, status = prepare_drift_history(
+        conformance_df=make_changepoint_drift_history(),
+        pipeline_id="payment_batch",
+    )
+
+    changepoint_dates = extract_changepoint_dates(history)
+
+    assert status == "ok"
+    assert len(changepoint_dates) == 1
+    assert str(changepoint_dates[0].date()) == "2026-05-03"
+
+
+def test_save_drift_chart_with_changepoint_marker_writes_png():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        path, status = save_drift_chart(
+            conformance_df=make_changepoint_drift_history(),
+            pipeline_id="payment_batch",
+            output_dir=str(tmp / "outputs" / "visualizations"),
+        )
+
+        # The test verifies that changepoint-enabled history renders safely.
+        # Pixel-level marker validation can be handled later in visual QA.
+        assert status == "ok"
+        assert path is not None
+        assert path.exists()
+        assert path.name == "drift_chart.png"
+        assert path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     print()
@@ -588,6 +655,10 @@ if __name__ == "__main__":
           test_save_drift_chart_writes_png)
     check("cmd_visualize drift writes PNG from conformance log",
           test_cmd_visualize_drift_writes_png_from_conformance_log)
+    check("extract_changepoint_dates deduplicates detected dates",
+          test_extract_changepoint_dates_deduplicates_detected_dates)
+    check("save_drift_chart with changepoint marker writes PNG",
+          test_save_drift_chart_with_changepoint_marker_writes_png)
 
     print()
     print(f"Results: {passed + failed} tests  v {passed}  x {failed}")
