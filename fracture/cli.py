@@ -1684,8 +1684,10 @@ def cmd_visualize(args):
     """
     Export static visualization artifacts for one pipeline.
 
-    V1 supports the bilateral gap timeline. Other visualization kinds are
-    reserved for later phases so the CLI can grow without changing its shape.
+    Phase 3 supports:
+    - gap: producer-consumer bilateral handoff timeline.
+    - drift: final_score trend from conformance_log.csv.
+    - all: every implemented visual.
     """
     pipeline_id = _resolve_pipeline(args)
     if not pipeline_id:
@@ -1693,80 +1695,105 @@ def cmd_visualize(args):
 
     kind = args.kind or "gap"
 
-    # Keep the CLI shape future-proof, but only implement the first visual now.
-    # `all` currently means "run all visuals implemented so far", which is gap.
-    if kind not in ("gap", "all"):
+    # Keep future options in argparse, but only run implemented visuals here.
+    if kind not in ("gap", "drift", "all"):
         print()
         print(f"  Visualization kind '{kind}' is not implemented yet.")
-        print("  Available in this build: gap")
+        print("  Available in this build: gap, drift")
         return 1
 
     from fracture.visualization import (
+        load_conformance_log,
         load_pipeline_events,
         save_bilateral_gap_timeline,
+        save_drift_chart,
     )
-
-    producer_event = "DATA_AVAILABLE"
-    consumer_event = "DATA_AVAILABLE"
-
-    # If a contract exists, use its configured handoff event names.
-    # This keeps the visualization aligned with middle-pipeline/custom contracts.
-    contract_path = Path(args.contracts_dir) / f"{pipeline_id}.yaml"
-    if contract_path.exists():
-        try:
-            from fracture.schema import load_contract
-            contract = load_contract(str(contract_path))
-            producer_event = contract.log_contract.upstream_producer_event
-            consumer_event = contract.log_contract.upstream_consumer_event
-        except Exception as e:
-            # Visualization can still run with default DATA_AVAILABLE markers.
-            # A bad contract should be visible, but should not hide valid logs.
-            print()
-            print(f"  Warning: could not read contract events, using defaults: {e}")
 
     print()
     print(f"  Visualizing: {pipeline_id}")
     print(f"  Kind       : {kind}")
     print(f"  Date       : {args.date or 'today'}")
 
-    producer_df, consumer_df, load_status = load_pipeline_events(
-        inputs_dir=args.inputs_dir,
-        pipeline_id=pipeline_id,
-        date_str=args.date,
-    )
+    saved_paths = []
+    skipped = []
 
-    if producer_df.empty:
-        # No producer log means there is no source timeline to draw.
+    if kind in ("gap", "all"):
+        producer_event = "DATA_AVAILABLE"
+        consumer_event = "DATA_AVAILABLE"
+
+        # If a contract exists, use its configured handoff event names.
+        contract_path = Path(args.contracts_dir) / f"{pipeline_id}.yaml"
+        if contract_path.exists():
+            try:
+                from fracture.schema import load_contract
+                contract = load_contract(str(contract_path))
+                producer_event = contract.log_contract.upstream_producer_event
+                consumer_event = contract.log_contract.upstream_consumer_event
+            except Exception as e:
+                # Bad contract should not block valid raw logs.
+                print()
+                print(f"  Warning: could not read contract events, using defaults: {e}")
+
+        producer_df, consumer_df, load_status = load_pipeline_events(
+            inputs_dir=args.inputs_dir,
+            pipeline_id=pipeline_id,
+            date_str=args.date,
+        )
+
+        if producer_df.empty:
+            # Gap visual needs producer timestamps as the anchor.
+            skipped.append(f"gap: {load_status}")
+        elif consumer_df is None:
+            # Bilateral gap cannot be measured from producer-only logs.
+            skipped.append("gap: consumer log unavailable")
+        else:
+            output_path, status = save_bilateral_gap_timeline(
+                producer_df=producer_df,
+                consumer_df=consumer_df,
+                pipeline_id=pipeline_id,
+                output_dir=args.output_dir,
+                producer_event=producer_event,
+                consumer_event=consumer_event,
+            )
+
+            if status == "ok":
+                saved_paths.append(output_path)
+            else:
+                skipped.append(f"gap: {status}")
+
+    if kind in ("drift", "all"):
+        # Drift visual uses conformance_log.csv, not inputs/.
+        log_path = getattr(args, "log_path", "conformance_log.csv")
+        conformance_df, log_status = load_conformance_log(log_path)
+
+        if conformance_df.empty:
+            skipped.append(f"drift: {log_status}")
+        else:
+            output_path, status = save_drift_chart(
+                conformance_df=conformance_df,
+                pipeline_id=pipeline_id,
+                output_dir=args.output_dir,
+            )
+
+            if status == "ok":
+                saved_paths.append(output_path)
+            else:
+                skipped.append(f"drift: {status}")
+
+    if saved_paths:
         print()
-        print(f"  Cannot create visualization: {load_status}")
-        return 1
+        print("  Created:")
+        for path in saved_paths:
+            print(f"    {path}")
 
-    if consumer_df is None:
-        # The bilateral gap requires both sides of the handoff.
-        # Producer-only logs are valid for conformance, but not for this visual.
+    if skipped:
         print()
-        print("  Cannot create bilateral gap timeline: consumer log unavailable.")
-        print("  Add inputs/{pipeline_id}/consumer_YYYYMMDD.csv or parquet.")
-        return 1
+        print("  Skipped:")
+        for item in skipped:
+            print(f"    {item}")
 
-    output_path, status = save_bilateral_gap_timeline(
-        producer_df=producer_df,
-        consumer_df=consumer_df,
-        pipeline_id=pipeline_id,
-        output_dir=args.output_dir,
-        producer_event=producer_event,
-        consumer_event=consumer_event,
-    )
-
-    if status != "ok":
-        # Return a clear status instead of creating a misleading empty image.
-        print()
-        print(f"  Visualization skipped: {status}")
-        return 1
-
-    print()
-    print(f"  Saved -> {output_path}")
-    return 0
+    # Success means at least one requested visual was created.
+    return 0 if saved_paths else 1
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -1865,9 +1892,14 @@ primary key:
                        help='YYYYMMDD input date to visualize')
     p_viz.add_argument('--kind', default='gap',
                        choices=['gap', 'all', 'petri', 'drift', 'dfg', 'heatmap'],
-                       help='Visualization kind. V1 implements gap only.')
+                       help='Visualization kind. Phase 3 implements gap and drift.')
     p_viz.add_argument('--output-dir', default='outputs/visualizations',
                        help='Where visualization files are written')
+
+    # Drift chart reads conformance history from this CSV.
+    # Keeping this configurable lets tests and demos use temporary log files.
+    p_viz.add_argument('--log-path', default='conformance_log.csv',
+                       help='Conformance log used by drift visualizations')
 
     # delete
     p_del = sub.add_parser('delete', help='Delete a run entry')

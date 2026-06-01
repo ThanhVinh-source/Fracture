@@ -30,6 +30,8 @@ from fracture.visualization import (
     load_cluster_assignments,
     compute_bilateral_gap_points,
     save_bilateral_gap_timeline,
+    prepare_drift_history,
+    save_drift_chart,
 )
 from fracture.cli import cmd_visualize
 
@@ -458,6 +460,79 @@ def test_cmd_visualize_rejects_unimplemented_kind():
     # Petri/drift/dfg are planned, but V1 only implements gap.
     assert cmd_visualize(args) == 1
 
+def make_drift_history():
+    # Minimal conformance_log-like data for one declining pipeline.
+    return pd.DataFrame([
+        {"pipeline_id": "payment_batch", "run_date": "20260501", "final_score": 0.98},
+        {"pipeline_id": "payment_batch", "run_date": "20260502", "final_score": 0.94},
+        {"pipeline_id": "payment_batch", "run_date": "20260503", "final_score": 0.90},
+        {"pipeline_id": "payment_batch", "run_date": "20260504", "final_score": 0.86},
+        {"pipeline_id": "other_pipeline", "run_date": "20260504", "final_score": 1.00},
+    ])
+
+
+def test_prepare_drift_history_filters_pipeline_and_scores():
+    history, status = prepare_drift_history(
+        conformance_df=make_drift_history(),
+        pipeline_id="payment_batch",
+    )
+
+    assert status == "ok"
+    assert len(history) == 4
+    assert history["pipeline_id"].nunique() == 1
+    assert history["final_score"].iloc[-1] == 0.86
+
+
+def test_save_drift_chart_writes_png():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        path, status = save_drift_chart(
+            conformance_df=make_drift_history(),
+            pipeline_id="payment_batch",
+            output_dir=str(tmp / "outputs" / "visualizations"),
+        )
+
+        assert status == "ok"
+        assert path is not None
+        assert path.exists()
+        assert path.name == "drift_chart.png"
+        assert path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_cmd_visualize_drift_writes_png_from_conformance_log():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        output_dir = tmp / "outputs" / "visualizations"
+        log_path = tmp / "conformance_log.csv"
+
+        # Drift visual reads conformance_log.csv directly.
+        make_drift_history().to_csv(log_path, index=False)
+
+        args = Namespace(
+            key=None,
+            pipeline_id="payment_batch",
+            date=None,
+            kind="drift",
+            inputs_dir=str(tmp / "inputs"),
+            contracts_dir=str(tmp / "contracts"),
+            output_dir=str(output_dir),
+            log_path=str(log_path),
+        )
+
+        exit_code = cmd_visualize(args)
+
+        expected_path = output_dir / "payment_batch" / "drift_chart.png"
+
+        assert exit_code == 0
+        assert expected_path.exists()
+        assert expected_path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     print()
@@ -496,6 +571,12 @@ if __name__ == "__main__":
           test_cmd_visualize_all_runs_gap_visual_for_now)
     check("cmd_visualize rejects unimplemented kind",
           test_cmd_visualize_rejects_unimplemented_kind)
+    check("prepare_drift_history filters pipeline score history",
+          test_prepare_drift_history_filters_pipeline_and_scores)
+    check("save_drift_chart writes PNG",
+          test_save_drift_chart_writes_png)
+    check("cmd_visualize drift writes PNG from conformance log",
+          test_cmd_visualize_drift_writes_png_from_conformance_log)
 
     print()
     print(f"Results: {passed + failed} tests  v {passed}  x {failed}")
