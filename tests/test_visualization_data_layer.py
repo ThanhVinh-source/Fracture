@@ -12,6 +12,7 @@ from __future__ import annotations
 import shutil
 import sys
 import tempfile
+import yaml
 from pathlib import Path
 from datetime import datetime, timezone
 from argparse import Namespace
@@ -35,6 +36,7 @@ from fracture.visualization import (
     extract_changepoint_dates,
     prepare_fleet_heatmap_matrix,
     save_fleet_heatmap,
+    save_contract_petri_net
 )
 from fracture.cli import cmd_visualize
 
@@ -465,13 +467,13 @@ def test_cmd_visualize_rejects_unimplemented_kind():
         key=None,
         pipeline_id="payment_batch",
         date="20260531",
-        kind="petri",
+        kind="dfg",
         inputs_dir="inputs",
         contracts_dir="contracts",
         output_dir="outputs/visualizations",
     )
 
-    # Petri/dfg/heatmap are planned, but Phase 3 currently implements gap and drift.
+    # DFG is planned, but Phase 3 currently implements gap, drift, heatmap, and petri.
     assert cmd_visualize(args) == 1
 
 def make_drift_history():
@@ -529,6 +531,65 @@ def make_changepoint_drift_history():
             "changepoint_date": "20260503",
         },
     ])
+
+def make_contract_yaml(optional_activities=None):
+    # Minimal active contract used by visualization tests.
+    # It mirrors the normal Fracture contract shape loaded from contracts/{pipeline}.yaml.
+    optional_activities = optional_activities or []
+
+    return {
+        "pipeline_id": "payment_batch",
+
+        # PipelineContract validates owner as an email address.
+        # Use a valid fake email so the test checks Petri rendering, not schema failure.
+        "owner": "data-team@example.com",
+
+        "producer_team": "producer",
+        "consumer_team": "consumer",
+        "criticality": "medium",
+        "status": "active",
+        "expected_start": "06:00",
+        "expected_end": "07:00",
+        "grace_minutes": 10,
+        "p50_minutes": 20,
+        "p95_minutes": 40,
+        "p99_minutes": 45,
+        "log_contract": {
+            # Required process path used to build the contract Petri net.
+            "required_events": [
+                "SCHEDULED",
+                "STARTED",
+                "COMPLETED",
+                "DATA_AVAILABLE",
+            ],
+
+            # Terminal event marks the expected process completion point.
+            "terminal_event": "DATA_AVAILABLE",
+
+            # source_path is required by LogContract schema.
+            # The Petri test does not read this folder, but the contract must be valid.
+            "source_path": "inputs/payment_batch/",
+
+            # Event-log column names expected by ingestion/conformance.
+            "timestamp_col": "timestamp",
+            "activity_col": "activity",
+            "case_id_col": "pipeline_run_id",
+            "team_col": "team",
+
+            # Optional activities are highlighted in the Petri visual if present.
+            "optional_activities": optional_activities,
+
+            # Empty map means raw event names already match contract activity names.
+            "activity_name_map": {},
+
+            # False keeps duplicate retry behavior unchanged for this test.
+            "deduplicate_retries": False,
+
+            # Pipeline grain means one trace = one pipeline run.
+            "grain": "pipeline",
+        },
+    }
+
 
 def test_prepare_drift_history_filters_pipeline_and_scores():
     history, status = prepare_drift_history(
@@ -687,6 +748,88 @@ def test_cmd_visualize_heatmap_writes_fleet_png():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+def test_save_contract_petri_net_writes_png():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        from fracture.schema import PipelineContract
+
+        # Build a contract object directly so this unit test focuses on rendering.
+        contract = PipelineContract(**make_contract_yaml())
+
+        path, status = save_contract_petri_net(
+            contract=contract,
+            output_dir=str(tmp / "outputs" / "visualizations"),
+        )
+
+        assert status == "ok"
+        assert path is not None
+        assert path.exists()
+        assert path.name == "contract_petri_net.png"
+        assert path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_cmd_visualize_petri_writes_contract_png():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        contracts_dir = tmp / "contracts"
+        output_dir = tmp / "outputs" / "visualizations"
+        contracts_dir.mkdir(parents=True)
+
+        # CLI Petri visualization reads contracts/{pipeline_id}.yaml.
+        contract_path = contracts_dir / "payment_batch.yaml"
+        contract_path.write_text(
+            yaml.safe_dump(make_contract_yaml()),
+            encoding="utf-8",
+        )
+
+        args = Namespace(
+            key=None,
+            pipeline_id="payment_batch",
+            date=None,
+            kind="petri",
+            inputs_dir=str(tmp / "inputs"),
+            contracts_dir=str(contracts_dir),
+            output_dir=str(output_dir),
+            log_path=str(tmp / "conformance_log.csv"),
+        )
+
+        exit_code = cmd_visualize(args)
+
+        expected_path = (
+            output_dir / "payment_batch" / "contract_petri_net.png"
+        )
+
+        assert exit_code == 0
+        assert expected_path.exists()
+        assert expected_path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_cmd_visualize_petri_skips_missing_contract():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        args = Namespace(
+            key=None,
+            pipeline_id="payment_batch",
+            date=None,
+            kind="petri",
+            inputs_dir=str(tmp / "inputs"),
+            contracts_dir=str(tmp / "contracts"),
+            output_dir=str(tmp / "outputs" / "visualizations"),
+            log_path=str(tmp / "conformance_log.csv"),
+        )
+
+        # Missing contract should return failure for petri-only mode, not crash.
+        assert cmd_visualize(args) == 1
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     print()
@@ -741,6 +884,12 @@ if __name__ == "__main__":
           test_save_fleet_heatmap_writes_png)
     check("cmd_visualize heatmap writes fleet PNG",
           test_cmd_visualize_heatmap_writes_fleet_png)
+    check("save_contract_petri_net writes PNG",
+          test_save_contract_petri_net_writes_png)
+    check("cmd_visualize petri writes contract PNG",
+          test_cmd_visualize_petri_writes_contract_png)
+    check("cmd_visualize petri skips missing contract",
+          test_cmd_visualize_petri_skips_missing_contract)
 
     print()
     print(f"Results: {passed + failed} tests  v {passed}  x {failed}")

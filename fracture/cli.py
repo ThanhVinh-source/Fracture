@@ -1700,10 +1700,10 @@ def cmd_visualize(args):
             return 1
 
     # Keep future options in argparse, but only run implemented visuals here.
-    if kind not in ("gap", "drift", "heatmap", "all"):
+    if kind not in ("gap", "drift", "heatmap", "petri", "all"):
         print()
         print(f"  Visualization kind '{kind}' is not implemented yet.")
-        print("  Available in this build: gap, drift, heatmap")
+        print("  Available in this build: gap, drift, heatmap, petri")
         return 1
 
     from fracture.visualization import (
@@ -1712,6 +1712,7 @@ def cmd_visualize(args):
         save_bilateral_gap_timeline,
         save_drift_chart,
         save_fleet_heatmap,
+        save_contract_petri_net,
     )
 
     print()
@@ -1784,6 +1785,31 @@ def cmd_visualize(args):
                 saved_paths.append(output_path)
             else:
                 skipped.append(f"drift: {status}")
+
+    if kind in ("petri", "all"):
+        # Petri net visual is contract-based.
+        # It explains the expected process model used for token replay.
+        contract_path = Path(args.contracts_dir) / f"{pipeline_id}.yaml"
+
+        if not contract_path.exists():
+            skipped.append(f"petri: missing contract {contract_path}")
+        else:
+            try:
+                from fracture.schema import load_contract
+                contract = load_contract(str(contract_path))
+            except Exception as e:
+                # Invalid YAML/schema should not crash other visuals in --kind all.
+                skipped.append(f"petri: could not load contract: {e}")
+            else:
+                output_path, status = save_contract_petri_net(
+                    contract=contract,
+                    output_dir=args.output_dir,
+                )
+
+                if status == "ok":
+                    saved_paths.append(output_path)
+                else:
+                    skipped.append(f"petri: {status}")
 
     if kind in ("heatmap", "all"):
         # Fleet heatmap uses conformance_log.csv across all pipelines.
@@ -1916,7 +1942,7 @@ primary key:
                        help='YYYYMMDD input date to visualize')
     p_viz.add_argument('--kind', default='gap',
                        choices=['gap', 'all', 'petri', 'drift', 'dfg', 'heatmap'],
-                       help='Visualization kind. Phase 3 implements gap, drift, and heatmap.')
+                       help='Visualization kind. Phase 3 implements gap, drift, heatmap, and petri.')
     p_viz.add_argument('--output-dir', default='outputs/visualizations',
                        help='Where visualization files are written')
 

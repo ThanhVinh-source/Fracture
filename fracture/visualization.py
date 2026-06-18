@@ -24,6 +24,7 @@ import numpy as np
 
 from fracture.ingest import load_pipeline_events as ingest_load_pipeline_events
 from fracture.schema import load_contract
+from fracture.petri import contract_to_petri_net  # Build expected Petri net from contract YAML.
 
 def ensure_visualization_dir (
         pipeline_id: Optional[str] = None,
@@ -787,3 +788,168 @@ def save_fleet_heatmap(
     plt.close(fig)
 
     return output_path, "ok"
+
+def _petri_node_id(obj) -> str:
+    """
+    Return a stable Graphviz node id for a PM4PY Petri net object.
+
+    PM4PY place/transition names can contain characters that are awkward in
+    Graphviz, so we normalize through string replacement.
+    """
+    # Keep IDs deterministic and simple for static PNG rendering.
+    return str(obj.name).replace(" ", "_").replace("-", "_").replace(":", "_")
+
+
+def save_contract_petri_net(
+    contract,
+    output_dir: str = "outputs/visualizations",
+) -> tuple[Optional[Path], str]:
+    """
+    Save a contract-derived Petri net PNG for one pipeline.
+
+    This visual explains the expected process model used by conformance checking.
+    It does not need event logs; it only needs a valid PipelineContract.
+    """
+    try:
+        # Use the same Petri construction path as the conformance runtime.
+        # This keeps the visual aligned with token replay behavior.
+        net, initial_marking, final_marking = contract_to_petri_net(
+            contract,
+            optional_activities=contract.log_contract.optional_activities,
+        )
+    except Exception as e:
+        # Bad/unsound contracts should be reported clearly by CLI/dashboard.
+        return None, f"petri_build_failed:{e}"
+
+    output_path = ensure_visualization_dir(
+        pipeline_id=contract.pipeline_id,
+        output_dir=output_dir,
+    ) / "contract_petri_net.png"
+
+    try:
+        from graphviz import Digraph
+    except Exception as e:
+        # Graphviz Python package or system binary may be unavailable.
+        # Return a clear status so CLI can explain the skipped artifact.
+        return None, f"graphviz_unavailable:{e}"
+
+    graph = Digraph(
+        name=f"contract_petri_net_{contract.pipeline_id}",
+        format="png",
+    )
+
+    # Left-to-right layout reads naturally as process flow.
+    graph.attr(rankdir="LR")
+
+    # Global graph styling: simple, readable, report-friendly.
+    graph.attr("graph", bgcolor="white", pad="0.2", nodesep="0.45", ranksep="0.65")
+    graph.attr("node", fontname="Helvetica", fontsize="10")
+    graph.attr("edge", color="#6b7280", arrowsize="0.7")
+
+    initial_places = {place.name for place in initial_marking.keys()}
+    final_places = {place.name for place in final_marking.keys()}
+
+    for place in sorted(net.places, key=lambda p: p.name):
+        node_id = f"p_{_petri_node_id(place)}"
+
+        # Start/end places should be visually distinguishable from intermediate places.
+        if place.name in initial_places:
+            fill = "#dbeafe"  # light blue = initial marking
+            label = "start"
+        elif place.name in final_places:
+            fill = "#dcfce7"  # light green = final marking
+            label = "end"
+        else:
+            fill = "#f9fafb"
+            label = ""
+
+        # Petri net places are circles.
+        graph.node(
+            node_id,
+            label=label,
+            shape="circle",
+            width="0.45",
+            fixedsize="true",
+            style="filled",
+            fillcolor=fill,
+            color="#374151",
+        )
+
+    optional_activities = set(contract.log_contract.optional_activities)
+
+    for transition in sorted(net.transitions, key=lambda t: t.name):
+        node_id = f"t_{_petri_node_id(transition)}"
+
+        if transition.label is None:
+            # Silent transitions include bypass arcs and terminal completion.
+            # Use small grey boxes because they are routing logic, not real log events.
+            label = "τ"
+            fill = "#e5e7eb"
+            color = "#6b7280"
+        else:
+            label = transition.label
+            if transition.label in optional_activities:
+                # Optional activities are real events but can be skipped.
+                fill = "#fef3c7"
+                color = "#d97706"
+            else:
+                # Required activities form the main expected process path.
+                fill = "#ffffff"
+                color = "#111827"
+
+        # Petri net transitions are boxes.
+        graph.node(
+            node_id,
+            label=label,
+            shape="box",
+            style="rounded,filled",
+            fillcolor=fill,
+            color=color,
+        )
+
+    for arc in sorted(net.arcs, key=lambda a: (a.source.name, a.target.name)):
+        source_prefix = "p" if source_is_place(arc.source) else "t"
+        target_prefix = "p" if source_is_place(arc.target) else "t"
+
+        source_id = f"{source_prefix}_{_petri_node_id(arc.source)}"
+        target_id = f"{target_prefix}_{_petri_node_id(arc.target)}"
+
+        # Bypass/silent arcs stay grey; event path stays neutral.
+        graph.edge(source_id, target_id)
+
+    # Add a compact legend so the PNG is understandable outside the CLI.
+    with graph.subgraph(name="cluster_legend") as legend:
+        legend.attr(label="Legend", color="#d1d5db", fontsize="10")
+        legend.node("legend_required", "Required event", shape="box",
+                    style="rounded,filled", fillcolor="#ffffff", color="#111827")
+        legend.node("legend_optional", "Optional event", shape="box",
+                    style="rounded,filled", fillcolor="#fef3c7", color="#d97706")
+        legend.node("legend_silent", "τ silent", shape="box",
+                    style="rounded,filled", fillcolor="#e5e7eb", color="#6b7280")
+        legend.node("legend_start", "start", shape="circle",
+                    style="filled", fillcolor="#dbeafe", color="#374151")
+        legend.node("legend_end", "end", shape="circle",
+                    style="filled", fillcolor="#dcfce7", color="#374151")
+
+    try:
+        # graph.render() writes contract_petri_net.png and a temporary source file.
+        rendered_path = graph.render(
+            filename=output_path.with_suffix("").name,
+            directory=str(output_path.parent),
+            cleanup=True,
+        )
+    except Exception as e:
+        # Most failures here mean the Graphviz system executable is missing.
+        return None, f"graphviz_render_failed:{e}"
+
+    return Path(rendered_path), "ok"
+
+
+def source_is_place(obj) -> bool:
+    """
+    Return True when a PM4PY Petri net arc endpoint is a place.
+
+    PM4PY place and transition classes are nested types, so checking the class
+    name keeps this helper simple and avoids importing internal PM4PY classes.
+    """
+    return obj.__class__.__name__ == "Place"
