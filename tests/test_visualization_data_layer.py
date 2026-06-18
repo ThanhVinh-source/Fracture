@@ -1,7 +1,7 @@
 """
 tests/test_visualization_data_layer.py
 
-Tests for the Phase 2 visualization data layer.
+Tests for the visualization data layer.
 
 These tests verify that dashboard loaders are safe around missing files,
 producer-only logs, and output directory creation.
@@ -30,6 +30,7 @@ from fracture.visualization import (
     load_pipeline_events,
     load_cluster_assignments,
     compute_bilateral_gap_points,
+    save_bilateral_gap_analysis,
     save_bilateral_gap_timeline,
     prepare_drift_history,
     save_drift_chart,
@@ -38,6 +39,7 @@ from fracture.visualization import (
     save_fleet_heatmap,
     save_contract_petri_net,
     save_discovered_dfg,
+    save_execution_time_drift,
     save_performance_dfg,
 )
 from fracture.cli import cmd_visualize
@@ -406,6 +408,29 @@ def test_save_bilateral_gap_timeline_writes_png():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+
+def test_save_bilateral_gap_analysis_writes_png():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        producer_df, consumer_df = make_bilateral_gap_events()
+
+        path, status = save_bilateral_gap_analysis(
+            producer_df=producer_df,
+            consumer_df=consumer_df,
+            pipeline_id="payment_batch",
+            output_dir=str(tmp / "outputs" / "visualizations"),
+        )
+
+        assert status == "ok"
+        assert path is not None
+        assert path.exists()
+        assert path.name == "bilateral_gap_analysis.png"
+        assert path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_cmd_visualize_gap_writes_png_from_input_files():
     tmp = Path(tempfile.mkdtemp())
     try:
@@ -435,10 +460,15 @@ def test_cmd_visualize_gap_writes_png_from_input_files():
         expected_path = (
             output_dir / "payment_batch" / "bilateral_gap_timeline.png"
         )
+        expected_analysis_path = (
+            output_dir / "payment_batch" / "bilateral_gap_analysis.png"
+        )
 
         assert exit_code == 0
         assert expected_path.exists()
         assert expected_path.stat().st_size > 0
+        assert expected_analysis_path.exists()
+        assert expected_analysis_path.stat().st_size > 0
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -478,6 +508,9 @@ def test_cmd_visualize_all_writes_gap_and_drift_png():
         expected_gap_path = (
             output_dir / "payment_batch" / "bilateral_gap_timeline.png"
         )
+        expected_gap_analysis_path = (
+            output_dir / "payment_batch" / "bilateral_gap_analysis.png"
+        )
         expected_drift_path = (
             output_dir / "payment_batch" / "drift_chart.png"
         )
@@ -485,6 +518,8 @@ def test_cmd_visualize_all_writes_gap_and_drift_png():
         assert exit_code == 0
         assert expected_gap_path.exists()
         assert expected_gap_path.stat().st_size > 0
+        assert expected_gap_analysis_path.exists()
+        assert expected_gap_analysis_path.stat().st_size > 0
         assert expected_drift_path.exists()
         assert expected_drift_path.stat().st_size > 0
 
@@ -881,6 +916,32 @@ def test_save_performance_dfg_writes_png():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_save_execution_time_drift_writes_png():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        from fracture.schema import PipelineContract
+
+        # Execution drift uses the same event traces as performance DFG, but
+        # renders total run duration against contract SLA boundaries.
+        contract = PipelineContract(**make_contract_yaml())
+
+        path, status = save_execution_time_drift(
+            events_df=make_process_events(team="producer"),
+            contract=contract,
+            log_side="producer",
+            output_dir=str(tmp / "outputs" / "visualizations"),
+        )
+
+        assert status == "ok"
+        assert path is not None
+        assert path.exists()
+        assert path.name == "execution_time_drift_producer.png"
+        assert path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_cmd_visualize_performance_writes_producer_and_consumer_pngs():
     tmp = Path(tempfile.mkdtemp())
     try:
@@ -920,12 +981,18 @@ def test_cmd_visualize_performance_writes_producer_and_consumer_pngs():
 
         producer_path = output_dir / "payment_batch" / "performance_dfg_producer.png"
         consumer_path = output_dir / "payment_batch" / "performance_dfg_consumer.png"
+        producer_drift_path = output_dir / "payment_batch" / "execution_time_drift_producer.png"
+        consumer_drift_path = output_dir / "payment_batch" / "execution_time_drift_consumer.png"
 
         assert exit_code == 0
         assert producer_path.exists()
         assert producer_path.stat().st_size > 0
         assert consumer_path.exists()
         assert consumer_path.stat().st_size > 0
+        assert producer_drift_path.exists()
+        assert producer_drift_path.stat().st_size > 0
+        assert consumer_drift_path.exists()
+        assert consumer_drift_path.stat().st_size > 0
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -1045,6 +1112,8 @@ if __name__ == "__main__":
           test_compute_bilateral_gap_points_handles_producer_only_mode)
     check("save_bilateral_gap_timeline writes PNG",
           test_save_bilateral_gap_timeline_writes_png)
+    check("save_bilateral_gap_analysis writes PNG",
+          test_save_bilateral_gap_analysis_writes_png)
     check("cmd_visualize gap writes PNG from input files",
           test_cmd_visualize_gap_writes_png_from_input_files)
     check("cmd_visualize all writes gap and drift PNGs",
@@ -1073,6 +1142,8 @@ if __name__ == "__main__":
           test_cmd_visualize_dfg_writes_producer_and_consumer_pngs)
     check("save_performance_dfg writes PNG",
           test_save_performance_dfg_writes_png)
+    check("save_execution_time_drift writes PNG",
+          test_save_execution_time_drift_writes_png)
     check("cmd_visualize performance writes producer and consumer PNGs",
           test_cmd_visualize_performance_writes_producer_and_consumer_pngs)
     check("save_contract_petri_net writes PNG",

@@ -22,7 +22,11 @@ import yaml
 import matplotlib.pyplot as plt
 import numpy as np
 
-from fracture.ingest import load_pipeline_events as ingest_load_pipeline_events
+from fracture.ingest import (
+    FRACTURE_COLUMNS,
+    load_pipeline_events as ingest_load_pipeline_events,
+    normalize_events,
+)
 from fracture.discovery import build_directly_follows_graph
 from fracture.performance import build_performance_summary
 from fracture.schema import load_contract
@@ -427,6 +431,167 @@ def save_bilateral_gap_timeline(
     plt.close(fig)
 
     return output_path, "ok"
+
+
+def save_bilateral_gap_analysis(
+    producer_df: pd.DataFrame,
+    consumer_df: Optional[pd.DataFrame],
+    pipeline_id: str,
+    output_dir: str = "outputs/visualizations",
+    producer_event: str = "DATA_AVAILABLE",
+    consumer_event: str = "DATA_AVAILABLE",
+) -> tuple[Optional[Path], str]:
+    """
+    Save a comparative bilateral gap analysis PNG for one pipeline.
+
+    This complements the timeline view:
+    - left panel: each run's producer-consumer delay as bars.
+    - right panel: gap trend over run order with a fitted line.
+    """
+    gap_df, status = compute_bilateral_gap_points(
+        producer_df=producer_df,
+        consumer_df=consumer_df,
+        producer_event=producer_event,
+        consumer_event=consumer_event,
+    )
+
+    if status != "ok":
+        # Reuse the same availability rules as the timeline visual.
+        return None, status
+
+    output_path = ensure_visualization_dir(
+        pipeline_id=pipeline_id,
+        output_dir=output_dir,
+    ) / "bilateral_gap_analysis.png"
+
+    plot_df = gap_df.copy().reset_index(drop=True)
+    plot_df["run_order"] = np.arange(1, len(plot_df) + 1)
+
+    gaps = plot_df["gap_minutes"].astype(float)
+    mean_gap = float(gaps.mean())
+    p95_gap = float(np.percentile(gaps, 95))
+
+    # One figure with two panels mirrors the analytical question:
+    # "How large is the gap?" and "Is it widening over runs?"
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5), sharey=True)
+    fig.patch.set_facecolor("#FCFCFD")
+
+    bar_ax, trend_ax = axes
+
+    # Left panel: bars make individual run delays easy to compare.
+    bar_ax.bar(
+        plot_df["run_order"],
+        gaps,
+        color="#F0986E",
+        edgecolor="#804126",
+        linewidth=0.8,
+    )
+    bar_ax.axhline(
+        mean_gap,
+        color="#1F2430",
+        linestyle="-",
+        linewidth=1.0,
+        label=f"mean {mean_gap:.1f}m",
+    )
+    bar_ax.axhline(
+        p95_gap,
+        color="#B8A037",
+        linestyle="--",
+        linewidth=1.2,
+        label=f"p95 {p95_gap:.1f}m",
+    )
+    bar_ax.set_title("Consumer delay by run")
+    bar_ax.set_xlabel("Pipeline run order")
+    bar_ax.set_ylabel("Gap minutes")
+    bar_ax.set_xlim(0.5, len(plot_df) + 0.5)
+    bar_ax.legend(loc="upper left", frameon=True, fontsize=8)
+    bar_ax.grid(axis="y", linestyle="--", alpha=0.25)
+
+    # Right panel: scatter + trend line shows whether the handoff is stable or widening.
+    trend_ax.scatter(
+        plot_df["run_order"],
+        gaps,
+        s=36,
+        color="#5477C4",
+        edgecolor="#2E4780",
+        linewidth=0.8,
+        alpha=0.85,
+        label="gap",
+    )
+
+    summary_text = [
+        f"Runs: {len(plot_df)}",
+        f"Mean: {mean_gap:.1f}m",
+        f"p95: {p95_gap:.1f}m",
+    ]
+
+    if len(plot_df) >= 2:
+        # Fit over ordinal run index because the comparison is per execution.
+        slope, intercept = np.polyfit(plot_df["run_order"], gaps, 1)
+        trend_y = intercept + slope * plot_df["run_order"]
+
+        trend_ax.plot(
+            plot_df["run_order"],
+            trend_y,
+            color="#CC6F47",
+            linewidth=1.6,
+            label=f"trend {slope:+.2f}m/run",
+        )
+
+        if slope > 0.05:
+            summary_text.append("Trend: widening")
+        elif slope < -0.05:
+            summary_text.append("Trend: narrowing")
+        else:
+            summary_text.append("Trend: stable")
+    else:
+        summary_text.append("Trend: insufficient history")
+
+    trend_ax.axhline(
+        p95_gap,
+        color="#B8A037",
+        linestyle="--",
+        linewidth=1.2,
+        label="p95",
+    )
+    trend_ax.set_title("Gap trend over runs")
+    trend_ax.set_xlabel("Pipeline run order")
+    trend_ax.set_xlim(0.5, len(plot_df) + 0.5)
+    trend_ax.grid(axis="y", linestyle="--", alpha=0.25)
+    trend_ax.legend(loc="upper left", frameon=True, fontsize=8)
+
+    trend_ax.text(
+        0.98,
+        0.03,
+        "\n".join(summary_text),
+        transform=trend_ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=8,
+        bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "alpha": 0.9},
+    )
+
+    fig.suptitle(
+        f"Bilateral Gap Analysis — {pipeline_id}",
+        fontsize=14,
+        fontweight="semibold",
+        color="#1F2430",
+    )
+    fig.text(
+        0.5,
+        0.93,
+        "Producer DATA_AVAILABLE to consumer DATA_AVAILABLE, measured per matched pipeline run",
+        ha="center",
+        fontsize=9,
+        color="#6F768A",
+    )
+
+    fig.tight_layout(rect=[0, 0, 1, 0.88])
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+    return output_path, "ok"
+
 
 def prepare_drift_history(
     conformance_df: pd.DataFrame,
@@ -1076,6 +1241,244 @@ def save_performance_dfg(
         return None, f"graphviz_render_failed:{e}"
 
     return Path(rendered_path), "ok"
+
+
+def prepare_execution_time_history(
+    events_df: pd.DataFrame,
+    contract,
+) -> tuple[pd.DataFrame, str]:
+    """
+    Prepare per-run execution durations for performance drift visuals.
+
+    One row represents one pipeline_run_id. Duration is measured from the first
+    observed event timestamp to the last observed event timestamp in that run.
+    """
+    if events_df is None or events_df.empty:
+        # No event log means there is no observed execution duration.
+        return pd.DataFrame(), "no_input"
+
+    missing = [col for col in FRACTURE_COLUMNS if col not in events_df.columns]
+    if missing:
+        # Keep the status explicit so CLI/dashboard can explain bad inputs.
+        return pd.DataFrame(), f"missing_columns:{missing}"
+
+    normalized = normalize_events(events_df, contract).copy()
+    normalized["timestamp"] = pd.to_datetime(
+        normalized["timestamp"],
+        utc=True,
+        errors="coerce",
+    )
+    normalized = normalized.dropna(subset=["pipeline_run_id", "timestamp"])
+
+    if normalized.empty:
+        # All timestamps were invalid or all run ids were missing.
+        return pd.DataFrame(), "no_valid_timestamps"
+
+    rows = []
+    for run_id, group in normalized.groupby("pipeline_run_id"):
+        ordered = group.sort_values("timestamp")
+        started_at = ordered["timestamp"].iloc[0]
+        ended_at = ordered["timestamp"].iloc[-1]
+        duration_minutes = (ended_at - started_at).total_seconds() / 60.0
+
+        if duration_minutes < 0:
+            # Negative duration means the trace is not reliable for drift.
+            continue
+
+        rows.append({
+            "pipeline_run_id": run_id,
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "duration_minutes": duration_minutes,
+            "event_count": int(len(ordered)),
+        })
+
+    history = pd.DataFrame(rows)
+    if history.empty:
+        return pd.DataFrame(), "no_complete_runs"
+
+    # Sort by start time so run_order reflects chronological process execution.
+    history = history.sort_values("started_at").reset_index(drop=True)
+    history["run_order"] = np.arange(1, len(history) + 1)
+
+    return history, "ok"
+
+
+def save_execution_time_drift(
+    events_df: pd.DataFrame,
+    contract,
+    log_side: str = "producer",
+    output_dir: str = "outputs/visualizations",
+) -> tuple[Optional[Path], str]:
+    """
+    Save execution duration drift PNG for one pipeline log side.
+
+    This extends the existing performance view with SLA reference lines:
+    - actual duration per run
+    - trend line
+    - p95 warning line from the contract
+    - p99 + grace breach deadline from the contract
+    """
+    history, status = prepare_execution_time_history(
+        events_df=events_df,
+        contract=contract,
+    )
+
+    if status != "ok":
+        # Do not draw empty trend charts; report why the visual is unavailable.
+        return None, status
+
+    output_path = ensure_visualization_dir(
+        pipeline_id=contract.pipeline_id,
+        output_dir=output_dir,
+    ) / f"execution_time_drift_{log_side}.png"
+
+    durations = history["duration_minutes"].astype(float)
+    p95_line = float(contract.p95_minutes)
+    deadline = float(contract.p99_minutes + contract.grace_minutes)
+    y_max = max(deadline * 1.08, float(durations.max()) * 1.15, 1.0)
+
+    fig, ax = plt.subplots(figsize=(11, 5.5))
+    fig.patch.set_facecolor("#FCFCFD")
+    ax.set_facecolor("#FFFFFF")
+
+    # Actual duration dots show one execution trace per pipeline_run_id.
+    ax.scatter(
+        history["run_order"],
+        durations,
+        s=38,
+        color="#5477C4",
+        edgecolor="#2E4780",
+        linewidth=0.8,
+        alpha=0.85,
+        label="actual duration",
+    )
+
+    # Contract thresholds turn the performance chart into an SLA risk view.
+    ax.axhline(
+        p95_line,
+        color="#B8A037",
+        linestyle="--",
+        linewidth=1.2,
+        label=f"contract p95 {p95_line:.0f}m",
+    )
+    ax.axhline(
+        deadline,
+        color="#CC6F47",
+        linestyle=":",
+        linewidth=1.5,
+        label=f"deadline {deadline:.0f}m",
+    )
+
+    summary_lines = [
+        f"Runs: {len(history)}",
+        f"Mean: {durations.mean():.1f}m",
+        f"p95 observed: {np.percentile(durations, 95):.1f}m",
+    ]
+    projected_order_for_axis = None
+
+    if len(history) >= 2:
+        x = history["run_order"].to_numpy(dtype=float)
+        y = durations.to_numpy(dtype=float)
+        slope, intercept = np.polyfit(x, y, 1)
+        trend_y = intercept + slope * x
+
+        ax.plot(
+            history["run_order"],
+            trend_y,
+            color="#CC6F47",
+            linewidth=1.6,
+            label=f"trend {slope:+.2f}m/run",
+        )
+
+        if slope > 0.05:
+            summary_lines.append("Trend: duration rising")
+        elif slope < -0.05:
+            summary_lines.append("Trend: duration improving")
+        else:
+            summary_lines.append("Trend: stable")
+
+        latest_duration = float(durations.iloc[-1])
+        latest_order = float(history["run_order"].iloc[-1])
+
+        if slope > 0 and latest_duration < deadline:
+            # Project only from an observed rising trend. This is deterministic,
+            # not ML: it answers "if this line continues, when is breach reached?"
+            runs_until_deadline = (deadline - latest_duration) / slope
+            projected_order = latest_order + runs_until_deadline
+
+            if 0 <= runs_until_deadline <= 180:
+                projected_order_for_axis = projected_order
+                ax.axvline(
+                    projected_order,
+                    color="#804126",
+                    linestyle=":",
+                    linewidth=1.0,
+                )
+                ax.text(
+                    projected_order,
+                    y_max * 0.95,
+                    f" breach around run {projected_order:.0f}",
+                    rotation=90,
+                    va="top",
+                    ha="left",
+                    fontsize=8,
+                    color="#804126",
+                )
+                summary_lines.append(f"Projected breach: run {projected_order:.0f}")
+            else:
+                summary_lines.append("Projected breach: not near-term")
+        elif latest_duration >= deadline:
+            summary_lines.append("Projected breach: already breached")
+        else:
+            summary_lines.append("Projected breach: unavailable")
+    else:
+        summary_lines.append("Trend: insufficient history")
+        summary_lines.append("Projected breach: unavailable")
+
+    ax.text(
+        0.02,
+        0.03,
+        "\n".join(summary_lines),
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=8,
+        bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "alpha": 0.9},
+    )
+
+    ax.set_title("")
+    ax.set_xlabel("Pipeline run order")
+    ax.set_ylabel("Execution duration minutes")
+    ax.set_ylim(0, y_max)
+    ax.set_xlim(
+        0.5,
+        max(len(history) + 0.5, (projected_order_for_axis or 0) + 2),
+    )
+    ax.grid(axis="y", linestyle="--", alpha=0.25)
+    ax.legend(loc="upper left", frameon=True, fontsize=8)
+
+    fig.suptitle(
+        f"Execution Time Drift — {contract.pipeline_id} ({log_side})",
+        fontsize=14,
+        fontweight="semibold",
+        color="#1F2430",
+    )
+    fig.text(
+        0.5,
+        0.93,
+        "Observed run duration compared with contract p95 and p99 plus grace deadline",
+        ha="center",
+        fontsize=9,
+        color="#6F768A",
+    )
+
+    fig.tight_layout(rect=[0, 0, 1, 0.88])
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+    return output_path, "ok"
+
 
 def _petri_node_id(obj) -> str:
     """

@@ -3,7 +3,7 @@ dashboard.py
 
 Streamlit dashboard for Fracture.
 
-This file is the Phase 4 UI layer. It should stay lightweight:
+This file is the UI layer. It should stay lightweight:
 - load data safely
 - arrange dashboard pages
 - call reusable helpers from fracture.visualization
@@ -22,11 +22,13 @@ from fracture.visualization import (
     load_conformance_log,
     load_contracts,
     load_pipeline_events,
+    save_bilateral_gap_analysis,
     save_bilateral_gap_timeline,
     save_drift_chart,
     save_fleet_heatmap,
     save_contract_petri_net,
     save_discovered_dfg,
+    save_execution_time_drift,
     save_performance_dfg,
 )
 from fracture.schema import load_contract
@@ -518,7 +520,8 @@ def ensure_visualizations_for_pipeline(
         consumer_event = contract.log_contract.upstream_consumer_event
 
     gap_path = pipeline_dir / "bilateral_gap_timeline.png"
-    if force or not gap_path.exists():
+    gap_analysis_path = pipeline_dir / "bilateral_gap_analysis.png"
+    if force or not gap_path.exists() or not gap_analysis_path.exists():
         producer_df, consumer_df, input_status = load_pipeline_events(
             inputs_dir=str(INPUTS_ROOT),
             pipeline_id=pipeline_id,
@@ -539,6 +542,20 @@ def ensure_visualizations_for_pipeline(
                 consumer_event=consumer_event,
             )
             statuses.append(f"gap: {status}" if path is None else f"gap created: {path}")
+
+            path, status = save_bilateral_gap_analysis(
+                producer_df=producer_df,
+                consumer_df=consumer_df,
+                pipeline_id=pipeline_id,
+                output_dir=str(VISUALIZATION_ROOT),
+                producer_event=producer_event,
+                consumer_event=consumer_event,
+            )
+            statuses.append(
+                f"gap analysis: {status}"
+                if path is None
+                else f"gap analysis created: {path}"
+            )
 
     drift_path = pipeline_dir / "drift_chart.png"
     if force or not drift_path.exists():
@@ -601,7 +618,8 @@ def ensure_visualizations_for_pipeline(
                 )
 
     performance_path = pipeline_dir / "performance_dfg_producer.png"
-    if force or not performance_path.exists():
+    execution_drift_path = pipeline_dir / "execution_time_drift_producer.png"
+    if force or not performance_path.exists() or not execution_drift_path.exists():
         if contract is None:
             statuses.append(f"performance skipped: {contract_status}")
         else:
@@ -626,6 +644,18 @@ def ensure_visualizations_for_pipeline(
                     else f"performance producer created: {path}"
                 )
 
+                path, status = save_execution_time_drift(
+                    events_df=producer_df,
+                    contract=contract,
+                    log_side="producer",
+                    output_dir=str(VISUALIZATION_ROOT),
+                )
+                statuses.append(
+                    f"execution drift producer: {status}"
+                    if path is None
+                    else f"execution drift producer created: {path}"
+                )
+
             if consumer_df is None:
                 statuses.append("performance consumer skipped: consumer log unavailable")
             else:
@@ -639,6 +669,18 @@ def ensure_visualizations_for_pipeline(
                     f"performance consumer: {status}"
                     if path is None
                     else f"performance consumer created: {path}"
+                )
+
+                path, status = save_execution_time_drift(
+                    events_df=consumer_df,
+                    contract=contract,
+                    log_side="consumer",
+                    output_dir=str(VISUALIZATION_ROOT),
+                )
+                statuses.append(
+                    f"execution drift consumer: {status}"
+                    if path is None
+                    else f"execution drift consumer created: {path}"
                 )
 
     heatmap_path = VISUALIZATION_ROOT / "fleet_heatmap.png"
@@ -737,6 +779,11 @@ def render_visualizations(conformance_df: pd.DataFrame):
             "Bilateral Gap Timeline",
             "No bilateral gap timeline exported yet.",
         )
+        render_visualization_image(
+            pipeline_dir / "bilateral_gap_analysis.png",
+            "Bilateral Gap Analysis",
+            "No bilateral gap analysis exported yet.",
+        )
 
     with drift_tab:
         st.caption(
@@ -782,6 +829,16 @@ def render_visualizations(conformance_df: pd.DataFrame):
             pipeline_dir / "performance_dfg_consumer.png",
             "Consumer Performance DFG",
             "No consumer Performance DFG exported yet.",
+        )
+        render_visualization_image(
+            pipeline_dir / "execution_time_drift_producer.png",
+            "Producer Execution Time Drift",
+            "No producer execution time drift exported yet.",
+        )
+        render_visualization_image(
+            pipeline_dir / "execution_time_drift_consumer.png",
+            "Consumer Execution Time Drift",
+            "No consumer execution time drift exported yet.",
         )
 
     with heatmap_tab:

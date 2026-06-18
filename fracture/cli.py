@@ -1711,11 +1711,13 @@ def cmd_visualize(args):
     from fracture.visualization import (
         load_conformance_log,
         load_pipeline_events,
+        save_bilateral_gap_analysis,
         save_bilateral_gap_timeline,
         save_drift_chart,
         save_fleet_heatmap,
         save_contract_petri_net,
         save_discovered_dfg,
+        save_execution_time_drift,
         save_performance_dfg,
     )
 
@@ -1757,6 +1759,7 @@ def cmd_visualize(args):
             # Bilateral gap cannot be measured from producer-only logs.
             skipped.append("gap: consumer log unavailable")
         else:
+            # Timeline shows the exact producer-to-consumer wait per run.
             output_path, status = save_bilateral_gap_timeline(
                 producer_df=producer_df,
                 consumer_df=consumer_df,
@@ -1770,6 +1773,22 @@ def cmd_visualize(args):
                 saved_paths.append(output_path)
             else:
                 skipped.append(f"gap: {status}")
+
+            # Analysis chart summarizes the same matched gaps with mean, p95,
+            # and trend so the CLI export matches the richer dashboard/report view.
+            output_path, status = save_bilateral_gap_analysis(
+                producer_df=producer_df,
+                consumer_df=consumer_df,
+                pipeline_id=pipeline_id,
+                output_dir=args.output_dir,
+                producer_event=producer_event,
+                consumer_event=consumer_event,
+            )
+
+            if status == "ok":
+                saved_paths.append(output_path)
+            else:
+                skipped.append(f"gap analysis: {status}")
 
     if kind in ("drift", "all"):
         # Drift visual uses conformance_log.csv, not inputs/.
@@ -1888,6 +1907,7 @@ def cmd_visualize(args):
                 if producer_df.empty:
                     skipped.append(f"performance producer: {load_status}")
                 else:
+                    # Performance DFG explains which process arcs are slow.
                     output_path, status = save_performance_dfg(
                         events_df=producer_df,
                         contract=contract,
@@ -1900,9 +1920,25 @@ def cmd_visualize(args):
                     else:
                         skipped.append(f"performance producer: {status}")
 
+                    # Execution drift explains whether total run duration is
+                    # moving toward the contract's p95/p99+grace boundaries.
+                    output_path, status = save_execution_time_drift(
+                        events_df=producer_df,
+                        contract=contract,
+                        log_side="producer",
+                        output_dir=args.output_dir,
+                    )
+
+                    if status == "ok":
+                        saved_paths.append(output_path)
+                    else:
+                        skipped.append(f"execution drift producer: {status}")
+
                 if consumer_df is None:
                     skipped.append("performance consumer: consumer log unavailable")
                 else:
+                    # Consumer-side performance is optional but useful when both
+                    # sides of the handoff emit full process traces.
                     output_path, status = save_performance_dfg(
                         events_df=consumer_df,
                         contract=contract,
@@ -1914,6 +1950,18 @@ def cmd_visualize(args):
                         saved_paths.append(output_path)
                     else:
                         skipped.append(f"performance consumer: {status}")
+
+                    output_path, status = save_execution_time_drift(
+                        events_df=consumer_df,
+                        contract=contract,
+                        log_side="consumer",
+                        output_dir=args.output_dir,
+                    )
+
+                    if status == "ok":
+                        saved_paths.append(output_path)
+                    else:
+                        skipped.append(f"execution drift consumer: {status}")
 
     if kind in ("heatmap", "all"):
         # Fleet heatmap uses conformance_log.csv across all pipelines.
