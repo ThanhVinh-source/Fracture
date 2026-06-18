@@ -1845,6 +1845,45 @@ def cmd_visualize(args):
     # Success means at least one requested visual was created.
     return 0 if saved_paths else 1
 
+def cmd_dashboard(args):
+    """
+    Start the local Streamlit dashboard.
+
+    The dashboard is intentionally kept at project root as dashboard.py so it
+    can import the local fracture package and read local contracts/inputs/logs.
+    """
+    import subprocess
+
+    dashboard_path = Path("dashboard.py")
+
+    if not dashboard_path.exists():
+        print()
+        print("  Dashboard file not found: dashboard.py")
+        print("  Run this command from the Fracture project root.")
+        return 1
+
+    print()
+    print("  Starting Fracture dashboard...")
+    print(f"  File: {dashboard_path}")
+    print()
+
+    try:
+        # Use a list instead of shell=True so paths with spaces remain safe.
+        return subprocess.run(
+            [
+                "streamlit",
+                "run",
+                str(dashboard_path),
+                "--server.port",
+                str(args.port),
+            ],
+            check=False,
+        ).returncode
+    except FileNotFoundError:
+        print("  Streamlit is not installed or not on PATH.")
+        print("  Install dependencies with: pip install -r requirements.txt")
+        return 1
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -1992,6 +2031,11 @@ primary key:
     # demo
     sub.add_parser('demo', help='Run on synthetic demo data')
 
+    # dashboard
+    p_dash = sub.add_parser('dashboard', help='Start the Streamlit dashboard')
+    p_dash.add_argument('--port', type=int, default=8501,
+                        help='Local Streamlit port')
+
     args = parser.parse_args()
 
     dispatch = {
@@ -2011,6 +2055,7 @@ primary key:
         'list':      cmd_list_pipelines,
         'explain':   cmd_explain,
         'demo':      cmd_demo,
+        'dashboard': cmd_dashboard,
     }
 
     if args.command in dispatch:

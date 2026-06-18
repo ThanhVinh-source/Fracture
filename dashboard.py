@@ -132,6 +132,178 @@ def explain_timing_score_mismatch(latest: pd.Series):
         )
 
 
+def numeric_value(row: pd.Series, column: str):
+    """
+    Read a numeric value from a conformance row.
+
+    CSV values can arrive as strings, empty cells, or real numbers. This helper
+    normalizes them before they are used in metric cards and warnings.
+    """
+    if column not in row.index:
+        return None
+
+    value = pd.to_numeric(row.get(column), errors="coerce")
+    if pd.isna(value):
+        return None
+
+    return float(value)
+
+
+def render_gap_callout(latest: pd.Series):
+    """
+    Highlight bilateral handoff risk when the producer-consumer gap is large.
+
+    The 20-minute threshold matches the high-gap count used on Fleet Overview.
+    """
+    gap = numeric_value(latest, "bilateral_gap_minutes")
+
+    if gap is None:
+        st.info("Bilateral gap is unavailable for this run.")
+    elif gap > 20:
+        st.error(
+            f"Bilateral gap is high: {gap:.1f} minutes. "
+            "The consumer receives data much later than the producer marks it available."
+        )
+    elif gap > 10:
+        st.warning(
+            f"Bilateral gap is elevated: {gap:.1f} minutes. "
+            "Monitor this handoff before it becomes a downstream delay."
+        )
+    else:
+        st.success(f"Bilateral gap is low: {gap:.1f} minutes.")
+
+
+def render_variant_explainer(latest: pd.Series):
+    """
+    Show the variant explanation as readable text instead of a cramped table row.
+
+    This field can be long because it explains skipped, repeated, or missing
+    process variants. A separate info block keeps the score table compact.
+    """
+    explainer = str(latest.get("variant_explainer", "")).strip()
+
+    if explainer and explainer.lower() != "nan":
+        st.info(explainer)
+    else:
+        st.caption("No variant explanation was recorded for this run.")
+
+
+def render_contract_summary_cards(
+    selected_pipeline: str,
+    contracts_df: pd.DataFrame,
+):
+    """
+    Render the most useful contract metadata as compact cards.
+
+    The raw contract table is still available in an expander, but the main page
+    should immediately show ownership, SLA window, criticality, and grain.
+    """
+    if contracts_df.empty or "pipeline_id" not in contracts_df.columns:
+        st.info("Contracts directory not available or no valid contracts found.")
+        return
+
+    contract_row = contracts_df[contracts_df["pipeline_id"] == selected_pipeline]
+
+    if contract_row.empty:
+        st.info("No contract metadata loaded for this pipeline.")
+        return
+
+    contract = contract_row.iloc[0]
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Owner", contract.get("owner", "n/a"))
+    col2.metric("Criticality", contract.get("criticality", "n/a"))
+    col3.metric("Status", contract.get("status", "n/a"))
+    col4.metric("Grain", contract.get("grain", "n/a"))
+
+    col5, col6, col7 = st.columns(3)
+    col5.metric("Expected start", contract.get("expected_start", "n/a"))
+    col6.metric("Expected end", contract.get("expected_end", "n/a"))
+    col7.metric("Consumer team", contract.get("consumer_team", "n/a"))
+
+    required_events = contract.get("required_events", "")
+    if required_events:
+        st.caption(f"Expected process: {required_events}")
+
+    with st.expander("Raw contract metadata", expanded=False):
+        st.dataframe(
+            contract_row,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
+def sorted_filter_options(df: pd.DataFrame, column: str) -> list[str]:
+    """
+    Return stable sidebar filter values for a categorical column.
+
+    Missing columns are allowed because older conformance logs may not contain
+    every dashboard field yet.
+    """
+    if column not in df.columns:
+        return []
+
+    values = df[column].dropna().astype(str)
+    values = values[values.str.strip() != ""]
+
+    return sorted(values.unique())
+
+
+def apply_fleet_filters(latest: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply Fleet Overview filters selected in the sidebar.
+
+    Filters operate on the latest row per pipeline because Fleet Overview is a
+    current-health view, not a full historical analysis page.
+    """
+    filtered = latest.copy()
+
+    timing_options = sorted_filter_options(latest, "timing_zone")
+    pattern_options = sorted_filter_options(latest, "pattern")
+    confidence_options = sorted_filter_options(latest, "confidence_level")
+
+    selected_timing = st.sidebar.multiselect(
+        "Timing zone",
+        timing_options,
+        default=timing_options,
+    )
+
+    selected_pattern = st.sidebar.multiselect(
+        "Pattern",
+        pattern_options,
+        default=pattern_options,
+    )
+
+    selected_confidence = st.sidebar.multiselect(
+        "Confidence",
+        confidence_options,
+        default=confidence_options,
+    )
+
+    high_gap_only = st.sidebar.checkbox(
+        "High-gap only",
+        value=False,
+        help="Show only pipelines where bilateral_gap_minutes is above 20.",
+    )
+
+    if selected_timing and "timing_zone" in filtered.columns:
+        filtered = filtered[filtered["timing_zone"].astype(str).isin(selected_timing)]
+
+    if selected_pattern and "pattern" in filtered.columns:
+        filtered = filtered[filtered["pattern"].astype(str).isin(selected_pattern)]
+
+    if selected_confidence and "confidence_level" in filtered.columns:
+        filtered = filtered[
+            filtered["confidence_level"].astype(str).isin(selected_confidence)
+        ]
+
+    if high_gap_only and "bilateral_gap_minutes" in filtered.columns:
+        gaps = pd.to_numeric(filtered["bilateral_gap_minutes"], errors="coerce")
+        filtered = filtered[gaps > 20]
+
+    return filtered
+
+
 def render_fleet_overview(conformance_df: pd.DataFrame):
     """
     Render the fleet-level overview page.
@@ -157,17 +329,23 @@ def render_fleet_overview(conformance_df: pd.DataFrame):
         .tail(1)
     )
 
-    total_pipelines = latest["pipeline_id"].nunique()
-    average_score = latest["final_score"].mean()
+    filtered_latest = apply_fleet_filters(latest)
+
+    total_pipelines = filtered_latest["pipeline_id"].nunique()
+    total_available = latest["pipeline_id"].nunique()
+    average_score = filtered_latest["final_score"].mean()
     high_gap_count = 0
 
-    if "bilateral_gap_minutes" in latest.columns:
-        gaps = pd.to_numeric(latest["bilateral_gap_minutes"], errors="coerce")
+    if "bilateral_gap_minutes" in filtered_latest.columns:
+        gaps = pd.to_numeric(
+            filtered_latest["bilateral_gap_minutes"],
+            errors="coerce",
+        )
         high_gap_count = int((gaps > 20).sum())
 
     col1, col2, col3 = st.columns(3)
 
-    col1.metric("Pipelines", total_pipelines)
+    col1.metric("Pipelines", f"{total_pipelines}/{total_available}")
     col2.metric("Average score", format_score(average_score))
     col3.metric("High-gap pipelines", high_gap_count)
 
@@ -185,11 +363,14 @@ def render_fleet_overview(conformance_df: pd.DataFrame):
 
     visible_columns = [col for col in visible_columns if col in latest.columns]
 
-    st.dataframe(
-        latest[visible_columns].sort_values("pipeline_id"),
-        use_container_width=True,
-        hide_index=True,
-    )
+    if filtered_latest.empty:
+        st.info("No pipelines match the selected filters.")
+    else:
+        st.dataframe(
+            filtered_latest[visible_columns].sort_values("pipeline_id"),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     st.caption(
         "Note: timing_zone is the latest timing classification only. "
@@ -240,45 +421,34 @@ def render_pipeline_detail(conformance_df: pd.DataFrame, contracts_df: pd.DataFr
     col3.metric("Confidence", latest.get("confidence_level", "n/a"))
     col4.metric("Pattern", latest.get("pattern", "n/a"))
 
+    render_gap_callout(latest)
+
     st.subheader("Score Breakdown")
 
-    breakdown_cols = [
-        "sequence_fitness",
-        "timing_score",
-        "completeness_score",
-        "bilateral_gap_minutes",
-        "variant_explainer",
-    ]
-
-    rows = []
-    for col in breakdown_cols:
-        if col in latest.index:
-            rows.append({
-                "metric": col,
-                "value": latest.get(col, ""),
-            })
-
-    st.dataframe(
-        pd.DataFrame(rows),
-        use_container_width=True,
-        hide_index=True,
+    score_col1, score_col2, score_col3 = st.columns(3)
+    score_col1.metric(
+        "Sequence fitness",
+        format_score(latest.get("sequence_fitness")),
+    )
+    score_col2.metric(
+        "Timing score",
+        format_score(latest.get("timing_score")),
+    )
+    score_col3.metric(
+        "Completeness score",
+        format_score(latest.get("completeness_score")),
     )
 
+    st.caption(
+        "Score formula: final_score = sequence_fitness * 0.35 "
+        "+ timing_score * 0.50 + completeness_score * 0.15"
+    )
+
+    st.subheader("Variant Explanation")
+    render_variant_explainer(latest)
+
     st.subheader("Contract Summary")
-
-    if not contracts_df.empty and "pipeline_id" in contracts_df.columns:
-        contract_row = contracts_df[contracts_df["pipeline_id"] == selected_pipeline]
-
-        if not contract_row.empty:
-            st.dataframe(
-                contract_row,
-                use_container_width=True,
-                hide_index=True,
-            )
-        else:
-            st.info("No contract metadata loaded for this pipeline.")
-    else:
-        st.info("Contracts directory not available or no valid contracts found.")
+    render_contract_summary_cards(selected_pipeline, contracts_df)
 
 
 def render_visualization_image(path: Path, title: str, missing_hint: str):
