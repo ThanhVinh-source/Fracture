@@ -27,7 +27,11 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 
 from fracture.cli import cmd_discover
-from fracture.discovery import discover_variants, format_discovery_summary
+from fracture.discovery import (
+    build_directly_follows_graph,
+    discover_variants,
+    format_discovery_summary,
+)
 from fracture.schema import PipelineContract
 
 
@@ -252,6 +256,37 @@ def test_discover_no_input_returns_no_input():
     assert summary.deviations == ["no input events available for discovery"]
 
 
+def test_build_directly_follows_graph_counts_arcs():
+    contract = make_contract()
+    events = make_events({
+        "run_1": ["SCHEDULED", "STARTED", "COMPLETED", "DATA_AVAILABLE"],
+        "run_2": ["SCHEDULED", "STARTED", "FAILED", "DATA_AVAILABLE"],
+    })
+
+    dfg = build_directly_follows_graph(events, contract)
+    edge_counts = {
+        (edge["source"], edge["target"]): edge["count"]
+        for edge in dfg.edges
+    }
+
+    assert dfg.status == "ok"
+    assert dfg.n_traces == 2
+    assert edge_counts[("SCHEDULED", "STARTED")] == 2
+    assert edge_counts[("STARTED", "COMPLETED")] == 1
+    assert edge_counts[("STARTED", "FAILED")] == 1
+    assert dfg.n_edges == 5
+
+
+def test_build_directly_follows_graph_no_input():
+    contract = make_contract()
+
+    dfg = build_directly_follows_graph(pd.DataFrame(), contract)
+
+    assert dfg.status == "no_input"
+    assert dfg.n_traces == 0
+    assert dfg.edges == []
+
+
 def test_format_discovery_summary_is_human_readable():
     contract = make_contract()
     events = make_events({
@@ -325,6 +360,10 @@ if __name__ == "__main__":
           test_discover_missing_activity_reports_deviation)
     check("discover no input returns no_input",
           test_discover_no_input_returns_no_input)
+    check("build directly-follows graph counts arcs",
+          test_build_directly_follows_graph_counts_arcs)
+    check("build directly-follows graph no input",
+          test_build_directly_follows_graph_no_input)
     check("format discovery summary is human readable",
           test_format_discovery_summary_is_human_readable)
     check("cmd_discover reads input CSV",

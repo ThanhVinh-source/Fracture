@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from fracture.ingest import load_pipeline_events as ingest_load_pipeline_events
+from fracture.discovery import build_directly_follows_graph
 from fracture.schema import load_contract
 from fracture.petri import contract_to_petri_net  # Build expected Petri net from contract YAML.
 
@@ -788,6 +789,138 @@ def save_fleet_heatmap(
     plt.close(fig)
 
     return output_path, "ok"
+
+
+def save_discovered_dfg(
+    events_df: pd.DataFrame,
+    contract,
+    log_side: str = "producer",
+    output_dir: str = "outputs/visualizations",
+) -> tuple[Optional[Path], str]:
+    """
+    Save a discovered Directly-Follows Graph PNG for one pipeline log side.
+
+    This visual shows the actual process behavior found in event logs:
+    activities become nodes, and adjacent activity pairs become frequency edges.
+    """
+    dfg = build_directly_follows_graph(
+        events=events_df,
+        contract=contract,
+        log_side=log_side,
+    )
+
+    if dfg.status != "ok":
+        # Do not export empty/misleading process graphs.
+        return None, dfg.status
+
+    output_path = ensure_visualization_dir(
+        pipeline_id=contract.pipeline_id,
+        output_dir=output_dir,
+    ) / f"discovered_dfg_{log_side}.png"
+
+    try:
+        from graphviz import Digraph
+    except Exception as e:
+        # Graphviz Python package may be unavailable in a fresh environment.
+        return None, f"graphviz_unavailable:{e}"
+
+    graph = Digraph(
+        name=f"discovered_dfg_{contract.pipeline_id}_{log_side}",
+        format="png",
+    )
+
+    # DFGs read naturally left-to-right as process flows.
+    graph.attr(rankdir="LR")
+
+    # Chart title/subtitle are kept inside the PNG so it remains understandable
+    # when copied into reports outside the CLI/dashboard.
+    graph.attr(
+        "graph",
+        bgcolor="white",
+        pad="0.25",
+        nodesep="0.55",
+        ranksep="0.8",
+        labelloc="t",
+        label=(
+            f"Discovered DFG — {contract.pipeline_id} ({log_side})\n"
+            f"Directly-follows frequency from {dfg.n_traces} traces"
+        ),
+        fontname="Helvetica",
+        fontsize="16",
+        fontcolor="#1f2430",
+    )
+    graph.attr("node", fontname="Helvetica", fontsize="10")
+    graph.attr("edge", fontname="Helvetica", fontsize="9", arrowsize="0.75")
+
+    # Identify start/end-like nodes from actual observed arcs, not from contract.
+    sources = {edge["source"] for edge in dfg.edges}
+    targets = {edge["target"] for edge in dfg.edges}
+    start_nodes = sources - targets
+    end_nodes = targets - sources
+
+    for node in dfg.nodes:
+        if node in start_nodes:
+            # Light blue marks observed starting activities.
+            fill = "#EAF1FE"
+            color = "#2E4780"
+        elif node in end_nodes:
+            # Light olive marks observed terminal activities.
+            fill = "#D8ECBD"
+            color = "#386411"
+        else:
+            # Neutral fill keeps intermediate activities quiet.
+            fill = "#FFFFFF"
+            color = "#464C55"
+
+        graph.node(
+            node,
+            label=node,
+            shape="box",
+            style="rounded,filled",
+            fillcolor=fill,
+            color=color,
+            fontcolor="#1f2430",
+        )
+
+    max_count = max(edge["count"] for edge in dfg.edges)
+
+    for edge in dfg.edges:
+        # Edge width encodes frequency, while the label preserves exact count.
+        # The cap keeps very frequent arcs readable instead of visually huge.
+        width = 1.0 + min(3.0, 3.0 * edge["count"] / max_count)
+
+        graph.edge(
+            edge["source"],
+            edge["target"],
+            label=str(edge["count"]),
+            penwidth=str(round(width, 2)),
+            color="#5477C4",
+            fontcolor="#464C55",
+        )
+
+    # Compact legend makes the static PNG self-explanatory.
+    with graph.subgraph(name="cluster_dfg_legend") as legend:
+        legend.attr(label="Legend", color="#d1d5db", fontsize="10")
+        legend.node("legend_start", "Observed start", shape="box",
+                    style="rounded,filled", fillcolor="#EAF1FE", color="#2E4780")
+        legend.node("legend_middle", "Activity", shape="box",
+                    style="rounded,filled", fillcolor="#FFFFFF", color="#464C55")
+        legend.node("legend_end", "Observed end", shape="box",
+                    style="rounded,filled", fillcolor="#D8ECBD", color="#386411")
+        legend.edge("legend_start", "legend_middle", label="frequency")
+
+    try:
+        # graph.render() writes discovered_dfg_{side}.png and removes the dot file.
+        rendered_path = graph.render(
+            filename=output_path.with_suffix("").name,
+            directory=str(output_path.parent),
+            cleanup=True,
+        )
+    except Exception as e:
+        # Most render failures mean the Graphviz system executable is missing.
+        return None, f"graphviz_render_failed:{e}"
+
+    return Path(rendered_path), "ok"
 
 def _petri_node_id(obj) -> str:
     """

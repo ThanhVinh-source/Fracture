@@ -36,7 +36,8 @@ from fracture.visualization import (
     extract_changepoint_dates,
     prepare_fleet_heatmap_matrix,
     save_fleet_heatmap,
-    save_contract_petri_net
+    save_contract_petri_net,
+    save_discovered_dfg,
 )
 from fracture.cli import cmd_visualize
 
@@ -335,6 +336,34 @@ def make_bilateral_gap_events():
 
     return producer_df, consumer_df
 
+
+def make_process_events(team="producer"):
+    """
+    Build full process traces for DFG visualization tests.
+
+    Unlike the bilateral gap helper, this includes every process activity so
+    the directly-follows graph has meaningful arcs.
+    """
+    base = datetime(2026, 5, 31, 6, 0, tzinfo=timezone.utc)
+    rows = []
+
+    for run_index in range(2):
+        run_id = f"run_{run_index + 1}"
+        for activity_index, activity in enumerate([
+            "SCHEDULED",
+            "STARTED",
+            "COMPLETED",
+            "DATA_AVAILABLE",
+        ]):
+            rows.append({
+                "pipeline_run_id": run_id,
+                "activity": activity,
+                "timestamp": base + pd.Timedelta(days=run_index, minutes=activity_index),
+                "team": team,
+            })
+
+    return pd.DataFrame(rows)
+
 def test_compute_bilateral_gap_points_returns_matched_gaps():
     producer_df, consumer_df = make_bilateral_gap_events()
 
@@ -462,18 +491,19 @@ def test_cmd_visualize_all_writes_gap_and_drift_png():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def test_cmd_visualize_rejects_unimplemented_kind():
+def test_cmd_visualize_rejects_unknown_kind():
     args = Namespace(
         key=None,
         pipeline_id="payment_batch",
         date="20260531",
-        kind="dfg",
+        kind="unknown",
         inputs_dir="inputs",
         contracts_dir="contracts",
         output_dir="outputs/visualizations",
     )
 
-    # DFG is planned, but Phase 3 currently implements gap, drift, heatmap, and petri.
+    # Direct function calls can still pass invalid kinds even though argparse
+    # normally blocks them before cmd_visualize runs.
     assert cmd_visualize(args) == 1
 
 def make_drift_history():
@@ -748,6 +778,83 @@ def test_cmd_visualize_heatmap_writes_fleet_png():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+
+def test_save_discovered_dfg_writes_png():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        from fracture.schema import PipelineContract
+
+        # Build a contract object directly so this unit test focuses on rendering.
+        contract = PipelineContract(**make_contract_yaml())
+
+        path, status = save_discovered_dfg(
+            events_df=make_process_events(team="producer"),
+            contract=contract,
+            log_side="producer",
+            output_dir=str(tmp / "outputs" / "visualizations"),
+        )
+
+        assert status == "ok"
+        assert path is not None
+        assert path.exists()
+        assert path.name == "discovered_dfg_producer.png"
+        assert path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_cmd_visualize_dfg_writes_producer_and_consumer_pngs():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        contracts_dir = tmp / "contracts"
+        inputs_dir = tmp / "inputs"
+        output_dir = tmp / "outputs" / "visualizations"
+        pipeline_dir = inputs_dir / "payment_batch"
+
+        contracts_dir.mkdir(parents=True)
+        pipeline_dir.mkdir(parents=True)
+
+        # DFG visualization needs a contract for activity normalization.
+        (contracts_dir / "payment_batch.yaml").write_text(
+            yaml.safe_dump(make_contract_yaml()),
+            encoding="utf-8",
+        )
+
+        # CLI DFG reads the same producer/consumer files as real Fracture runs.
+        make_process_events(team="producer").to_parquet(
+            pipeline_dir / "producer_20260531.parquet"
+        )
+        make_process_events(team="consumer").to_parquet(
+            pipeline_dir / "consumer_20260531.parquet"
+        )
+
+        args = Namespace(
+            key=None,
+            pipeline_id="payment_batch",
+            date="20260531",
+            kind="dfg",
+            inputs_dir=str(inputs_dir),
+            contracts_dir=str(contracts_dir),
+            output_dir=str(output_dir),
+            log_path=str(tmp / "conformance_log.csv"),
+        )
+
+        exit_code = cmd_visualize(args)
+
+        producer_path = output_dir / "payment_batch" / "discovered_dfg_producer.png"
+        consumer_path = output_dir / "payment_batch" / "discovered_dfg_consumer.png"
+
+        assert exit_code == 0
+        assert producer_path.exists()
+        assert producer_path.stat().st_size > 0
+        assert consumer_path.exists()
+        assert consumer_path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_save_contract_petri_net_writes_png():
     tmp = Path(tempfile.mkdtemp())
     try:
@@ -866,8 +973,8 @@ if __name__ == "__main__":
           test_cmd_visualize_gap_writes_png_from_input_files)
     check("cmd_visualize all writes gap and drift PNGs",
           test_cmd_visualize_all_writes_gap_and_drift_png)
-    check("cmd_visualize rejects unimplemented kind",
-          test_cmd_visualize_rejects_unimplemented_kind)
+    check("cmd_visualize rejects unknown kind",
+          test_cmd_visualize_rejects_unknown_kind)
     check("prepare_drift_history filters pipeline score history",
           test_prepare_drift_history_filters_pipeline_and_scores)
     check("save_drift_chart writes PNG",
@@ -884,6 +991,10 @@ if __name__ == "__main__":
           test_save_fleet_heatmap_writes_png)
     check("cmd_visualize heatmap writes fleet PNG",
           test_cmd_visualize_heatmap_writes_fleet_png)
+    check("save_discovered_dfg writes PNG",
+          test_save_discovered_dfg_writes_png)
+    check("cmd_visualize dfg writes producer and consumer PNGs",
+          test_cmd_visualize_dfg_writes_producer_and_consumer_pngs)
     check("save_contract_petri_net writes PNG",
           test_save_contract_petri_net_writes_png)
     check("cmd_visualize petri writes contract PNG",

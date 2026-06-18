@@ -62,6 +62,50 @@ class DiscoverySummary:
         }
 
 
+@dataclass
+class DirectlyFollowsGraph:
+    """
+    Directly-Follows Graph discovered from actual event traces.
+
+    A DFG edge A -> B means activity B happened immediately after activity A
+    in one or more traces.
+    """
+
+    pipeline_id: str
+    log_side: str
+    status: str
+    n_traces: int
+    nodes: list[str]
+    edges: list[dict]
+
+    @property
+    def n_edges(self) -> int:
+        """Return the number of unique directly-follows arcs."""
+        return len(self.edges)
+
+    @property
+    def total_edge_count(self) -> int:
+        """Return total observed directly-follows transitions across traces."""
+        return sum(edge["count"] for edge in self.edges)
+
+    def as_dataframe(self) -> pd.DataFrame:
+        """Return edges as a DataFrame for tables, charts, or exports."""
+        return pd.DataFrame(self.edges)
+
+    def as_dict(self) -> dict:
+        """Return plain Python values for JSON/report/dashboard use."""
+        return {
+            "pipeline_id": self.pipeline_id,
+            "log_side": self.log_side,
+            "status": self.status,
+            "n_traces": self.n_traces,
+            "nodes": self.nodes,
+            "edges": self.edges,
+            "n_edges": self.n_edges,
+            "total_edge_count": self.total_edge_count,
+        }
+
+
 def _validate_discovery_input(events: pd.DataFrame) -> list[str]:
     """
     Check that discovery has the same four columns as conformance.
@@ -120,6 +164,22 @@ def _ordered_variant(trace_df: pd.DataFrame) -> tuple[str, ...]:
     """
     ordered = trace_df.sort_values("timestamp")
     return tuple(ordered["activity"].astype(str).tolist())
+
+
+def _normalize_for_discovery(events: pd.DataFrame, contract) -> pd.DataFrame:
+    """
+    Normalize event logs before any discovery calculation.
+
+    This keeps variant mining and DFG mining aligned with conformance checking:
+    same activity_name_map, same retry deduplication, same four-column schema.
+    """
+    _validate_discovery_input(events)
+
+    normalized = normalize_events(events, contract)
+    normalized = normalized.copy()
+    normalized["timestamp"] = pd.to_datetime(normalized["timestamp"])
+
+    return normalized
 
 
 def _variant_deviations(
@@ -204,13 +264,9 @@ def discover_variants(
             deviations=["no input events available for discovery"],
         )
 
-    _validate_discovery_input(events)
-
     # Use the same normalization rules as conformance so discovery and token
     # replay speak the same activity vocabulary.
-    normalized = normalize_events(events, contract)
-    normalized = normalized.copy()
-    normalized["timestamp"] = pd.to_datetime(normalized["timestamp"])
+    normalized = _normalize_for_discovery(events, contract)
 
     variants = Counter()
     for _run_id, trace_df in normalized.groupby("pipeline_run_id"):
@@ -265,6 +321,93 @@ def discover_variants(
         comparison_path=comparison_path,
         dominant_matches_contract=dominant_matches_contract,
         deviations=deviations,
+    )
+
+
+def build_directly_follows_graph(
+    events: pd.DataFrame,
+    contract,
+    log_side: str = "producer",
+) -> DirectlyFollowsGraph:
+    """
+    Build a Directly-Follows Graph from actual event traces.
+
+    One trace is one pipeline_run_id. Every adjacent activity pair contributes
+    one count to the edge frequency.
+    """
+    if events is None or events.empty:
+        return DirectlyFollowsGraph(
+            pipeline_id=contract.pipeline_id,
+            log_side=log_side,
+            status="no_input",
+            n_traces=0,
+            nodes=[],
+            edges=[],
+        )
+
+    normalized = _normalize_for_discovery(events, contract)
+
+    edge_counts = Counter()
+    nodes = set()
+    trace_count = 0
+
+    for _run_id, trace_df in normalized.groupby("pipeline_run_id"):
+        variant = list(_ordered_variant(trace_df))
+
+        if not variant:
+            # Empty traces should not contribute false nodes or edges.
+            continue
+
+        trace_count += 1
+        nodes.update(variant)
+
+        # Pair each activity with the activity that immediately follows it.
+        for source, target in zip(variant, variant[1:]):
+            edge_counts[(source, target)] += 1
+
+    if trace_count == 0:
+        return DirectlyFollowsGraph(
+            pipeline_id=contract.pipeline_id,
+            log_side=log_side,
+            status="no_traces",
+            n_traces=0,
+            nodes=[],
+            edges=[],
+        )
+
+    if not edge_counts:
+        return DirectlyFollowsGraph(
+            pipeline_id=contract.pipeline_id,
+            log_side=log_side,
+            status="no_edges",
+            n_traces=trace_count,
+            nodes=sorted(nodes),
+            edges=[],
+        )
+
+    edges = [
+        {
+            "source": source,
+            "target": target,
+            "count": count,
+        }
+        for (source, target), count in edge_counts.items()
+    ]
+
+    # Sort by frequency first so tables and future dashboard views surface the
+    # most important actual path edges at the top.
+    edges = sorted(
+        edges,
+        key=lambda edge: (-edge["count"], edge["source"], edge["target"]),
+    )
+
+    return DirectlyFollowsGraph(
+        pipeline_id=contract.pipeline_id,
+        log_side=log_side,
+        status="ok",
+        n_traces=trace_count,
+        nodes=sorted(nodes),
+        edges=edges,
     )
 
 
