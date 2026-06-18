@@ -2024,6 +2024,120 @@ def cmd_discover(args):
     return 0 if summary.status == "ok" else 1
 
 
+def cmd_compare(args):
+    """
+    Run comparative process mining for one pipeline.
+
+    Phase 5 Step 4 focuses on CLI-readable comparisons first:
+    - producer-consumer: compare bilateral handoff timestamps.
+    - contract-actual: compare actual dominant variant with the contract path.
+    - period: compare latest N conformance rows with the previous N rows.
+
+    The same comparison functions can later be reused by Streamlit dashboard
+    pages without duplicating process-mining logic.
+    """
+    pipeline_id = _resolve_pipeline(args)
+    if not pipeline_id:
+        return 1
+
+    from fracture.comparison import (
+        compare_contract_actual,
+        compare_periods,
+        compare_producer_consumer,
+        format_comparison_result,
+    )
+
+    print()
+    print(f"  Comparing: {pipeline_id}")
+    print(f"  Mode     : {args.mode}")
+
+    if args.mode == "grain":
+        # Cross-grain comparison needs both parent and child contracts plus
+        # record-level data. Keep the CLI option visible but explicit for V1.
+        print()
+        print("  Grain comparison is planned for the next extension.")
+        print("  Needed inputs: parent pipeline contract + child trade/record contract.")
+        return 1
+
+    if args.mode == "period":
+        # Period comparison reads persisted conformance history rather than
+        # raw event files because it compares already scored pipeline runs.
+        import pandas as pd
+
+        log_path = Path(args.log_path)
+        if not log_path.exists():
+            print()
+            print(f"  Cannot compare periods: missing {log_path}")
+            print("  Run conformance first: fracture run-all")
+            return 1
+
+        conformance_df = pd.read_csv(log_path)
+        result = compare_periods(
+            conformance_df=conformance_df,
+            pipeline_id=pipeline_id,
+            period_size=args.period_size,
+        )
+    else:
+        # Event-log comparisons need the contract so raw activity names can be
+        # normalized the same way as conformance, discovery, and performance.
+        contract_path = Path(args.contracts_dir) / f"{pipeline_id}.yaml"
+        if not contract_path.exists():
+            print()
+            print(f"  Cannot compare: missing contract {contract_path}")
+            return 1
+
+        try:
+            from fracture.schema import load_contract
+            contract = load_contract(str(contract_path))
+        except Exception as e:
+            print()
+            print(f"  Cannot compare: could not load contract: {e}")
+            return 1
+
+        try:
+            from fracture.ingest import load_pipeline_events
+            producer_df, consumer_df = load_pipeline_events(
+                pipeline_id=pipeline_id,
+                inputs_dir=args.inputs_dir,
+                date_str=args.date,
+            )
+        except FileNotFoundError as e:
+            print()
+            print(f"  Cannot compare: missing input: {e}")
+            return 1
+        except ValueError as e:
+            print()
+            print(f"  Cannot compare: invalid input: {e}")
+            return 1
+
+        if args.mode == "producer-consumer":
+            result = compare_producer_consumer(
+                producer_events=producer_df,
+                consumer_events=consumer_df,
+                contract=contract,
+            )
+        elif args.mode == "contract-actual":
+            # Producer is the default actual process side because most Fracture
+            # contracts define the producer lifecycle. Consumer can be selected
+            # for bilateral/middle-pipeline investigations.
+            events = consumer_df if args.side == "consumer" else producer_df
+            result = compare_contract_actual(
+                events=events,
+                contract=contract,
+                log_side=args.side,
+            )
+        else:
+            print()
+            print(f"  Unknown comparison mode: {args.mode}")
+            return 1
+
+    print()
+    for line in format_comparison_result(result).splitlines():
+        print(f"  {line}" if line else "")
+
+    return 0 if result.status == "ok" else 1
+
+
 def cmd_dashboard(args):
     """
     Start the local Streamlit dashboard.
@@ -2087,6 +2201,7 @@ fleet commands:
 
 process mining:
   fracture discover --pipeline-id X              ← discover actual variants
+  fracture compare --pipeline-id X               ← compare process perspectives
 
 primary key:
   (pipeline_id, run_date) — unique per pipeline per day
@@ -2186,6 +2301,27 @@ primary key:
                         choices=['producer', 'consumer'],
                         help='Which event log side to mine')
 
+    # compare
+    p_cmp = sub.add_parser(
+        'compare',
+        help='Run comparative process mining'
+    )
+    p_cmp.add_argument('--key', default=None,
+                       help='Pipeline key FRC-xxxxxxxx')
+    p_cmp.add_argument('--pipeline-id', default=None, dest='pipeline_id')
+    p_cmp.add_argument('--date', default=None,
+                       help='YYYYMMDD input date to compare')
+    p_cmp.add_argument('--mode', default='producer-consumer',
+                       choices=['producer-consumer', 'contract-actual', 'period', 'grain'],
+                       help='Comparison mode to run')
+    p_cmp.add_argument('--side', default='producer',
+                       choices=['producer', 'consumer'],
+                       help='Event log side for contract-actual comparison')
+    p_cmp.add_argument('--period-size', type=int, default=7,
+                       help='Number of latest rows per period for period comparison')
+    p_cmp.add_argument('--log-path', default='conformance_log.csv',
+                       help='Conformance log used by period comparison')
+
     # delete
     p_del = sub.add_parser('delete', help='Delete a run entry')
     p_del.add_argument('--pipeline-id', required=True, dest='pipeline_id')
@@ -2245,6 +2381,7 @@ primary key:
         'status':    cmd_status,
         'visualize': cmd_visualize,
         'discover':  cmd_discover,
+        'compare':   cmd_compare,
         'delete':    cmd_delete,
         'log':       cmd_log,
         'deprecate':   cmd_deprecate,
