@@ -1845,6 +1845,81 @@ def cmd_visualize(args):
     # Success means at least one requested visual was created.
     return 0 if saved_paths else 1
 
+
+def cmd_discover(args):
+    """
+    Discover actual process variants from event logs.
+
+    Phase 5 Step 1 keeps discovery focused on variants:
+    - one pipeline_run_id = one trace
+    - one ordered activity sequence = one variant
+    - dominant variant is compared against the contract path
+    """
+    pipeline_id = _resolve_pipeline(args)
+    if not pipeline_id:
+        return 1
+
+    contract_path = Path(args.contracts_dir) / f"{pipeline_id}.yaml"
+    if not contract_path.exists():
+        print()
+        print(f"  Cannot discover process: missing contract {contract_path}")
+        print("  Discovery needs the contract path for expected-vs-actual comparison.")
+        return 1
+
+    try:
+        from fracture.schema import load_contract
+        contract = load_contract(str(contract_path))
+    except Exception as e:
+        # Bad contracts should fail clearly before any mining result is trusted.
+        print()
+        print(f"  Cannot discover process: could not load contract: {e}")
+        return 1
+
+    from fracture.discovery import discover_variants, format_discovery_summary
+    from fracture.ingest import load_pipeline_events
+
+    try:
+        producer_df, consumer_df = load_pipeline_events(
+            pipeline_id=pipeline_id,
+            inputs_dir=args.inputs_dir,
+            date_str=args.date,
+        )
+        load_status = "producer_only" if consumer_df is None else "ok"
+    except FileNotFoundError as e:
+        # Missing files are reported as discovery no_input instead of a crash.
+        producer_df, consumer_df = None, None
+        load_status = f"missing_input: {e}"
+    except ValueError as e:
+        # Bad event format means discovery cannot trust the actual process.
+        producer_df, consumer_df = None, None
+        load_status = f"invalid_input: {e}"
+
+    # Producer is the default because most Fracture contracts describe the
+    # producer-side pipeline lifecycle.
+    if args.side == "consumer":
+        events = consumer_df
+    else:
+        events = producer_df
+
+    summary = discover_variants(
+        events=events,
+        contract=contract,
+        log_side=args.side,
+    )
+
+    print()
+    if load_status not in ("ok", "producer_only"):
+        print(f"  Input status: {load_status}")
+        print()
+
+    # The formatted block is kept plain text so it works in terminal, reports,
+    # and copied project documentation.
+    for line in format_discovery_summary(summary).splitlines():
+        print(f"  {line}" if line else "")
+
+    return 0 if summary.status == "ok" else 1
+
+
 def cmd_dashboard(args):
     """
     Start the local Streamlit dashboard.
@@ -1905,6 +1980,9 @@ fleet commands:
   fracture list                                  ← all registered pipelines
   fracture delete --pipeline-id X --date DATE    ← remove a bad run
   fracture demo                                  ← try with synthetic data
+
+process mining:
+  fracture discover --pipeline-id X              ← discover actual variants
 
 primary key:
   (pipeline_id, run_date) — unique per pipeline per day
@@ -1990,6 +2068,20 @@ primary key:
     p_viz.add_argument('--log-path', default='conformance_log.csv',
                        help='Conformance log used by drift visualizations')
 
+    # discover
+    p_disc = sub.add_parser(
+        'discover',
+        help='Discover actual process variants from event logs'
+    )
+    p_disc.add_argument('--key', default=None,
+                        help='Pipeline key FRC-xxxxxxxx')
+    p_disc.add_argument('--pipeline-id', default=None, dest='pipeline_id')
+    p_disc.add_argument('--date', default=None,
+                        help='YYYYMMDD input date to discover')
+    p_disc.add_argument('--side', default='producer',
+                        choices=['producer', 'consumer'],
+                        help='Which event log side to mine')
+
     # delete
     p_del = sub.add_parser('delete', help='Delete a run entry')
     p_del.add_argument('--pipeline-id', required=True, dest='pipeline_id')
@@ -2048,6 +2140,7 @@ primary key:
         'template':  cmd_template,
         'status':    cmd_status,
         'visualize': cmd_visualize,
+        'discover':  cmd_discover,
         'delete':    cmd_delete,
         'log':       cmd_log,
         'deprecate':   cmd_deprecate,
