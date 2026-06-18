@@ -1689,17 +1689,21 @@ def cmd_visualize(args):
     - drift: final_score trend from conformance_log.csv.
     - all: every implemented visual.
     """
-    pipeline_id = _resolve_pipeline(args)
-    if not pipeline_id:
-        return 1
-
     kind = args.kind or "gap"
 
+    # Heatmap is fleet-level, so it does not require --pipeline-id.
+    # Pipeline-specific visuals still require a selected pipeline.
+    pipeline_id = None
+    if kind != "heatmap":
+        pipeline_id = _resolve_pipeline(args)
+        if not pipeline_id:
+            return 1
+
     # Keep future options in argparse, but only run implemented visuals here.
-    if kind not in ("gap", "drift", "all"):
+    if kind not in ("gap", "drift", "heatmap", "all"):
         print()
         print(f"  Visualization kind '{kind}' is not implemented yet.")
-        print("  Available in this build: gap, drift")
+        print("  Available in this build: gap, drift, heatmap")
         return 1
 
     from fracture.visualization import (
@@ -1707,10 +1711,11 @@ def cmd_visualize(args):
         load_pipeline_events,
         save_bilateral_gap_timeline,
         save_drift_chart,
+        save_fleet_heatmap,
     )
 
     print()
-    print(f"  Visualizing: {pipeline_id}")
+    print(f"  Visualizing: {pipeline_id if pipeline_id else 'fleet'}")
     print(f"  Kind       : {kind}")
     print(f"  Date       : {args.date or 'today'}")
 
@@ -1779,6 +1784,25 @@ def cmd_visualize(args):
                 saved_paths.append(output_path)
             else:
                 skipped.append(f"drift: {status}")
+
+    if kind in ("heatmap", "all"):
+        # Fleet heatmap uses conformance_log.csv across all pipelines.
+        # It does not read producer/consumer input files.
+        log_path = getattr(args, "log_path", "conformance_log.csv")
+        conformance_df, log_status = load_conformance_log(log_path)
+
+        if conformance_df.empty:
+            skipped.append(f"heatmap: {log_status}")
+        else:
+            output_path, status = save_fleet_heatmap(
+                conformance_df=conformance_df,
+                output_dir=args.output_dir,
+            )
+
+            if status == "ok":
+                saved_paths.append(output_path)
+            else:
+                skipped.append(f"heatmap: {status}")                
 
     if saved_paths:
         print()
@@ -1892,7 +1916,7 @@ primary key:
                        help='YYYYMMDD input date to visualize')
     p_viz.add_argument('--kind', default='gap',
                        choices=['gap', 'all', 'petri', 'drift', 'dfg', 'heatmap'],
-                       help='Visualization kind. Phase 3 implements gap and drift.')
+                       help='Visualization kind. Phase 3 implements gap, drift, and heatmap.')
     p_viz.add_argument('--output-dir', default='outputs/visualizations',
                        help='Where visualization files are written')
 

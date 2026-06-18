@@ -641,3 +641,149 @@ def save_drift_chart(
     plt.close(fig)
 
     return output_path, "ok"
+
+def prepare_fleet_heatmap_matrix(
+    conformance_df: pd.DataFrame,
+    score_column: str = "final_score",
+) -> tuple[pd.DataFrame, str]:
+    """
+    Prepare a fleet-level weekday heatmap matrix.
+
+    Rows are pipeline_id values.
+    Columns are weekdays.
+    Cell values are mean final_score for that pipeline on that weekday.
+    """
+    required_columns = {"pipeline_id", "run_date", score_column}
+    missing_columns = required_columns - set(conformance_df.columns)
+
+    if missing_columns:
+        # Heatmap needs pipeline, date, and score fields from conformance_log.csv.
+        return pd.DataFrame(), f"missing_columns:{sorted(missing_columns)}"
+
+    df = conformance_df.copy()
+
+    # Convert scores to numeric because CSV may contain empty strings for failed rows.
+    df[score_column] = pd.to_numeric(df[score_column], errors="coerce")
+
+    # Parse run_date safely from YYYYMMDD or YYYY-MM-DD formats.
+    df["run_date"] = _parse_run_date_series(df["run_date"])
+
+    # Drop rows that cannot contribute to a score heatmap.
+    df = df.dropna(subset=["pipeline_id", "run_date", score_column])
+
+    if df.empty:
+        # There is a log file, but no usable score/date rows.
+        return pd.DataFrame(), "no_plottable_fleet_history"
+
+    # Use weekday names because the goal is to reveal weekly/intermittent patterns.
+    df["weekday"] = df["run_date"].dt.day_name()
+
+    weekday_order = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ]
+
+    # Mean score is used so multiple historical runs on the same weekday collapse
+    # into one stable cell for the fleet overview.
+    matrix = df.pivot_table(
+        index="pipeline_id",
+        columns="weekday",
+        values=score_column,
+        aggfunc="mean",
+    )
+
+    # Keep weekday order stable even when some days are missing from the log.
+    matrix = matrix.reindex(columns=weekday_order)
+
+    # Sort pipelines alphabetically for predictable static exports.
+    matrix = matrix.sort_index()
+
+    return matrix, "ok"
+
+
+def save_fleet_heatmap(
+    conformance_df: pd.DataFrame,
+    output_dir: str = "outputs/visualizations",
+    score_column: str = "final_score",
+) -> tuple[Optional[Path], str]:
+    """
+    Save a fleet-level weekday heatmap PNG.
+
+    This is a fleet overview visual, so it writes directly to
+    outputs/visualizations/fleet_heatmap.png instead of a per-pipeline folder.
+    """
+    matrix, status = prepare_fleet_heatmap_matrix(
+        conformance_df=conformance_df,
+        score_column=score_column,
+    )
+
+    if status != "ok":
+        # Do not create a misleading empty heatmap.
+        return None, status
+
+    output_path = ensure_visualization_dir(
+        output_dir=output_dir,
+    ) / "fleet_heatmap.png"
+
+    # Convert to a masked array so missing weekday values render as neutral grey.
+    values = matrix.to_numpy(dtype=float)
+    masked_values = np.ma.masked_invalid(values)
+
+    # Height grows with pipeline count so labels remain readable.
+    fig_height = max(4, min(12, 1.6 + 0.45 * len(matrix)))
+    fig, ax = plt.subplots(figsize=(10, fig_height))
+
+    # Red-yellow-green makes low/high score status immediately readable.
+    cmap = plt.cm.get_cmap("RdYlGn").copy()
+    cmap.set_bad("#e5e7eb")  # Neutral grey for missing days, not red.
+
+    image = ax.imshow(
+        masked_values,
+        aspect="auto",
+        cmap=cmap,
+        vmin=0.0,
+        vmax=1.05,
+    )
+
+    ax.set_title("Fleet Weekday Heatmap")
+    ax.set_xlabel("Weekday")
+    ax.set_ylabel("Pipeline")
+
+    ax.set_xticks(np.arange(len(matrix.columns)))
+    ax.set_xticklabels(matrix.columns, rotation=35, ha="right")
+
+    ax.set_yticks(np.arange(len(matrix.index)))
+    ax.set_yticklabels(matrix.index)
+
+    # Put score labels inside cells when data exists.
+    for row_idx in range(matrix.shape[0]):
+        for col_idx in range(matrix.shape[1]):
+            value = matrix.iloc[row_idx, col_idx]
+
+            if pd.isna(value):
+                # Missing days stay blank to avoid implying failure.
+                continue
+
+            ax.text(
+                col_idx,
+                row_idx,
+                f"{value:.2f}",
+                ha="center",
+                va="center",
+                fontsize=8,
+                color="#111827",
+            )
+
+    colorbar = fig.colorbar(image, ax=ax)
+    colorbar.set_label("Mean final_score")
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+    return output_path, "ok"

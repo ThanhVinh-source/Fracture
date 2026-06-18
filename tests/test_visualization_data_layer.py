@@ -33,6 +33,8 @@ from fracture.visualization import (
     prepare_drift_history,
     save_drift_chart,
     extract_changepoint_dates,
+    prepare_fleet_heatmap_matrix,
+    save_fleet_heatmap,
 )
 from fracture.cli import cmd_visualize
 
@@ -482,6 +484,18 @@ def make_drift_history():
         {"pipeline_id": "other_pipeline", "run_date": "20260504", "final_score": 1.00},
     ])
 
+def make_fleet_heatmap_history():
+    # Minimal fleet history with multiple pipelines and weekdays.
+    # This tests fleet-level visualization, not one pipeline detail.
+    return pd.DataFrame([
+        {"pipeline_id": "payment_batch", "run_date": "20260525", "final_score": 0.98},
+        {"pipeline_id": "payment_batch", "run_date": "20260526", "final_score": 0.92},
+        {"pipeline_id": "payment_batch", "run_date": "20260527", "final_score": 0.84},
+        {"pipeline_id": "trade_positions_sftp", "run_date": "20260525", "final_score": 0.88},
+        {"pipeline_id": "trade_positions_sftp", "run_date": "20260526", "final_score": 0.76},
+        {"pipeline_id": "trade_positions_sftp", "run_date": "20260527", "final_score": 0.68},
+    ])
+
 def make_changepoint_drift_history():
     # Minimal conformance_log-like data with one detected changepoint.
     # This simulates the analytical layer persisting ruptures output into CSV.
@@ -611,6 +625,68 @@ def test_save_drift_chart_with_changepoint_marker_writes_png():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+def test_prepare_fleet_heatmap_matrix_builds_weekday_matrix():
+    matrix, status = prepare_fleet_heatmap_matrix(
+        conformance_df=make_fleet_heatmap_history(),
+    )
+
+    assert status == "ok"
+    assert "payment_batch" in matrix.index
+    assert "trade_positions_sftp" in matrix.index
+    assert "Monday" in matrix.columns
+    assert "Tuesday" in matrix.columns
+    assert "Wednesday" in matrix.columns
+
+
+def test_save_fleet_heatmap_writes_png():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        path, status = save_fleet_heatmap(
+            conformance_df=make_fleet_heatmap_history(),
+            output_dir=str(tmp / "outputs" / "visualizations"),
+        )
+
+        assert status == "ok"
+        assert path is not None
+        assert path.exists()
+        assert path.name == "fleet_heatmap.png"
+        assert path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_cmd_visualize_heatmap_writes_fleet_png():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        output_dir = tmp / "outputs" / "visualizations"
+        log_path = tmp / "conformance_log.csv"
+
+        # Heatmap reads all pipelines from conformance_log.csv.
+        make_fleet_heatmap_history().to_csv(log_path, index=False)
+
+        args = Namespace(
+            key=None,
+            pipeline_id=None,
+            date=None,
+            kind="heatmap",
+            inputs_dir=str(tmp / "inputs"),
+            contracts_dir=str(tmp / "contracts"),
+            output_dir=str(output_dir),
+            log_path=str(log_path),
+        )
+
+        exit_code = cmd_visualize(args)
+
+        expected_path = output_dir / "fleet_heatmap.png"
+
+        assert exit_code == 0
+        assert expected_path.exists()
+        assert expected_path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     print()
@@ -659,6 +735,12 @@ if __name__ == "__main__":
           test_extract_changepoint_dates_deduplicates_detected_dates)
     check("save_drift_chart with changepoint marker writes PNG",
           test_save_drift_chart_with_changepoint_marker_writes_png)
+    check("prepare_fleet_heatmap_matrix builds weekday matrix",
+          test_prepare_fleet_heatmap_matrix_builds_weekday_matrix)
+    check("save_fleet_heatmap writes PNG",
+          test_save_fleet_heatmap_writes_png)
+    check("cmd_visualize heatmap writes fleet PNG",
+          test_cmd_visualize_heatmap_writes_fleet_png)
 
     print()
     print(f"Results: {passed + failed} tests  v {passed}  x {failed}")
