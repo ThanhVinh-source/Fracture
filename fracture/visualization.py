@@ -24,6 +24,7 @@ import numpy as np
 
 from fracture.ingest import load_pipeline_events as ingest_load_pipeline_events
 from fracture.discovery import build_directly_follows_graph
+from fracture.performance import build_performance_summary
 from fracture.schema import load_contract
 from fracture.petri import contract_to_petri_net  # Build expected Petri net from contract YAML.
 
@@ -918,6 +919,160 @@ def save_discovered_dfg(
         )
     except Exception as e:
         # Most render failures mean the Graphviz system executable is missing.
+        return None, f"graphviz_render_failed:{e}"
+
+    return Path(rendered_path), "ok"
+
+
+def save_performance_dfg(
+    events_df: pd.DataFrame,
+    contract,
+    log_side: str = "producer",
+    output_dir: str = "outputs/visualizations",
+) -> tuple[Optional[Path], str]:
+    """
+    Save a Performance DFG PNG for one pipeline log side.
+
+    This graph keeps the DFG structure but changes edge labels from frequency
+    only to timing metrics: count, mean duration, and p95 duration.
+    """
+    performance = build_performance_summary(
+        events=events_df,
+        contract=contract,
+        log_side=log_side,
+    )
+
+    if performance.status != "ok":
+        # Empty or untimed logs should not produce a misleading graph.
+        return None, performance.status
+
+    output_path = ensure_visualization_dir(
+        pipeline_id=contract.pipeline_id,
+        output_dir=output_dir,
+    ) / f"performance_dfg_{log_side}.png"
+
+    try:
+        from graphviz import Digraph
+    except Exception as e:
+        return None, f"graphviz_unavailable:{e}"
+
+    graph = Digraph(
+        name=f"performance_dfg_{contract.pipeline_id}_{log_side}",
+        format="png",
+    )
+
+    run_summary = performance.run_duration_minutes or {}
+    run_mean = run_summary.get("mean_minutes")
+    run_p95 = run_summary.get("p95_minutes")
+    run_text = "run duration unavailable"
+    if run_mean is not None and run_p95 is not None:
+        run_text = f"run mean {run_mean:.1f}m, run p95 {run_p95:.1f}m"
+
+    graph.attr(rankdir="LR")
+    graph.attr(
+        "graph",
+        bgcolor="white",
+        pad="0.25",
+        nodesep="0.55",
+        ranksep="0.8",
+        labelloc="t",
+        label=(
+            f"Performance DFG — {contract.pipeline_id} ({log_side})\n"
+            f"Arc durations from {performance.n_traces} traces; {run_text}"
+        ),
+        fontname="Helvetica",
+        fontsize="16",
+        fontcolor="#1f2430",
+    )
+    graph.attr("node", fontname="Helvetica", fontsize="10")
+    graph.attr("edge", fontname="Helvetica", fontsize="9", arrowsize="0.75")
+
+    sources = {arc["source"] for arc in performance.arcs}
+    targets = {arc["target"] for arc in performance.arcs}
+    start_nodes = sources - targets
+    end_nodes = targets - sources
+
+    for node in performance.nodes:
+        if node in start_nodes:
+            fill = "#EAF1FE"
+            color = "#2E4780"
+        elif node in end_nodes:
+            fill = "#D8ECBD"
+            color = "#386411"
+        else:
+            fill = "#FFFFFF"
+            color = "#464C55"
+
+        graph.node(
+            node,
+            label=node,
+            shape="box",
+            style="rounded,filled",
+            fillcolor=fill,
+            color=color,
+            fontcolor="#1f2430",
+        )
+
+    bottleneck_key = None
+    if performance.bottleneck_arc:
+        bottleneck_key = (
+            performance.bottleneck_arc["source"],
+            performance.bottleneck_arc["target"],
+        )
+
+    max_p95 = max(arc["p95_minutes"] for arc in performance.arcs)
+
+    for arc in performance.arcs:
+        arc_key = (arc["source"], arc["target"])
+        is_bottleneck = arc_key == bottleneck_key
+
+        # Width scales by p95 so long-tail slow arcs are visually prominent.
+        width = 1.0 + min(3.0, 3.0 * arc["p95_minutes"] / max_p95)
+
+        if is_bottleneck:
+            color = "#CC6F47"
+            fontcolor = "#804126"
+        else:
+            color = "#5477C4"
+            fontcolor = "#464C55"
+
+        label = (
+            f"n={arc['count']} | "
+            f"mean {arc['mean_minutes']:.1f}m | "
+            f"p95 {arc['p95_minutes']:.1f}m"
+        )
+
+        graph.edge(
+            arc["source"],
+            arc["target"],
+            label=label,
+            penwidth=str(round(width, 2)),
+            color=color,
+            fontcolor=fontcolor,
+        )
+
+    with graph.subgraph(name="cluster_performance_legend") as legend:
+        legend.attr(label="Legend", color="#d1d5db", fontsize="10")
+        legend.node("legend_start", "Observed start", shape="box",
+                    style="rounded,filled", fillcolor="#EAF1FE", color="#2E4780")
+        legend.node("legend_middle", "Activity", shape="box",
+                    style="rounded,filled", fillcolor="#FFFFFF", color="#464C55")
+        legend.node("legend_end", "Observed end", shape="box",
+                    style="rounded,filled", fillcolor="#D8ECBD", color="#386411")
+        legend.node("legend_bottleneck", "Bottleneck arc", shape="plaintext",
+                    fontcolor="#804126")
+        legend.edge("legend_start", "legend_middle", label="mean / p95 minutes",
+                    color="#5477C4")
+        legend.edge("legend_middle", "legend_end", label="slowest p95",
+                    color="#CC6F47", fontcolor="#804126", penwidth="2.4")
+
+    try:
+        rendered_path = graph.render(
+            filename=output_path.with_suffix("").name,
+            directory=str(output_path.parent),
+            cleanup=True,
+        )
+    except Exception as e:
         return None, f"graphviz_render_failed:{e}"
 
     return Path(rendered_path), "ok"

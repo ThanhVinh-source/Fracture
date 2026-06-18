@@ -27,6 +27,7 @@ from fracture.visualization import (
     save_fleet_heatmap,
     save_contract_petri_net,
     save_discovered_dfg,
+    save_performance_dfg,
 )
 from fracture.schema import load_contract
 
@@ -599,6 +600,47 @@ def ensure_visualizations_for_pipeline(
                     f"dfg consumer: {status}" if path is None else f"dfg consumer created: {path}"
                 )
 
+    performance_path = pipeline_dir / "performance_dfg_producer.png"
+    if force or not performance_path.exists():
+        if contract is None:
+            statuses.append(f"performance skipped: {contract_status}")
+        else:
+            producer_df, consumer_df, input_status = load_pipeline_events(
+                inputs_dir=str(INPUTS_ROOT),
+                pipeline_id=pipeline_id,
+                date_str=date_str,
+            )
+
+            if producer_df.empty:
+                statuses.append(f"performance producer skipped: {input_status}")
+            else:
+                path, status = save_performance_dfg(
+                    events_df=producer_df,
+                    contract=contract,
+                    log_side="producer",
+                    output_dir=str(VISUALIZATION_ROOT),
+                )
+                statuses.append(
+                    f"performance producer: {status}"
+                    if path is None
+                    else f"performance producer created: {path}"
+                )
+
+            if consumer_df is None:
+                statuses.append("performance consumer skipped: consumer log unavailable")
+            else:
+                path, status = save_performance_dfg(
+                    events_df=consumer_df,
+                    contract=contract,
+                    log_side="consumer",
+                    output_dir=str(VISUALIZATION_ROOT),
+                )
+                statuses.append(
+                    f"performance consumer: {status}"
+                    if path is None
+                    else f"performance consumer created: {path}"
+                )
+
     heatmap_path = VISUALIZATION_ROOT / "fleet_heatmap.png"
     if force or not heatmap_path.exists():
         if conformance_df.empty:
@@ -680,11 +722,12 @@ def render_visualizations(conformance_df: pd.DataFrame):
             for status in generation_statuses:
                 st.write(status)
 
-    gap_tab, drift_tab, petri_tab, dfg_tab, heatmap_tab = st.tabs([
+    gap_tab, drift_tab, petri_tab, dfg_tab, performance_tab, heatmap_tab = st.tabs([
         "Bilateral Gap",
         "Drift",
         "Petri Net",
         "Discovered DFG",
+        "Performance DFG",
         "Fleet Heatmap",
     ])
 
@@ -723,6 +766,22 @@ def render_visualizations(conformance_df: pd.DataFrame):
             pipeline_dir / "discovered_dfg_consumer.png",
             "Discovered Consumer DFG",
             "No consumer DFG exported yet.",
+        )
+
+    with performance_tab:
+        st.caption(
+            "Performance DFG labels each actual arc with count, mean duration, "
+            "and p95 duration. The highlighted arc is the slowest p95 bottleneck."
+        )
+        render_visualization_image(
+            pipeline_dir / "performance_dfg_producer.png",
+            "Producer Performance DFG",
+            "No producer Performance DFG exported yet.",
+        )
+        render_visualization_image(
+            pipeline_dir / "performance_dfg_consumer.png",
+            "Consumer Performance DFG",
+            "No consumer Performance DFG exported yet.",
         )
 
     with heatmap_tab:

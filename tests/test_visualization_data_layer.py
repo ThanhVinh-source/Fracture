@@ -38,6 +38,7 @@ from fracture.visualization import (
     save_fleet_heatmap,
     save_contract_petri_net,
     save_discovered_dfg,
+    save_performance_dfg,
 )
 from fracture.cli import cmd_visualize
 
@@ -855,6 +856,81 @@ def test_cmd_visualize_dfg_writes_producer_and_consumer_pngs():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_save_performance_dfg_writes_png():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        from fracture.schema import PipelineContract
+
+        # Build a contract object directly so this test focuses on performance rendering.
+        contract = PipelineContract(**make_contract_yaml())
+
+        path, status = save_performance_dfg(
+            events_df=make_process_events(team="producer"),
+            contract=contract,
+            log_side="producer",
+            output_dir=str(tmp / "outputs" / "visualizations"),
+        )
+
+        assert status == "ok"
+        assert path is not None
+        assert path.exists()
+        assert path.name == "performance_dfg_producer.png"
+        assert path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_cmd_visualize_performance_writes_producer_and_consumer_pngs():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        contracts_dir = tmp / "contracts"
+        inputs_dir = tmp / "inputs"
+        output_dir = tmp / "outputs" / "visualizations"
+        pipeline_dir = inputs_dir / "payment_batch"
+
+        contracts_dir.mkdir(parents=True)
+        pipeline_dir.mkdir(parents=True)
+
+        # Performance visualization needs the contract for normalization rules.
+        (contracts_dir / "payment_batch.yaml").write_text(
+            yaml.safe_dump(make_contract_yaml()),
+            encoding="utf-8",
+        )
+
+        make_process_events(team="producer").to_parquet(
+            pipeline_dir / "producer_20260531.parquet"
+        )
+        make_process_events(team="consumer").to_parquet(
+            pipeline_dir / "consumer_20260531.parquet"
+        )
+
+        args = Namespace(
+            key=None,
+            pipeline_id="payment_batch",
+            date="20260531",
+            kind="performance",
+            inputs_dir=str(inputs_dir),
+            contracts_dir=str(contracts_dir),
+            output_dir=str(output_dir),
+            log_path=str(tmp / "conformance_log.csv"),
+        )
+
+        exit_code = cmd_visualize(args)
+
+        producer_path = output_dir / "payment_batch" / "performance_dfg_producer.png"
+        consumer_path = output_dir / "payment_batch" / "performance_dfg_consumer.png"
+
+        assert exit_code == 0
+        assert producer_path.exists()
+        assert producer_path.stat().st_size > 0
+        assert consumer_path.exists()
+        assert consumer_path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_save_contract_petri_net_writes_png():
     tmp = Path(tempfile.mkdtemp())
     try:
@@ -995,6 +1071,10 @@ if __name__ == "__main__":
           test_save_discovered_dfg_writes_png)
     check("cmd_visualize dfg writes producer and consumer PNGs",
           test_cmd_visualize_dfg_writes_producer_and_consumer_pngs)
+    check("save_performance_dfg writes PNG",
+          test_save_performance_dfg_writes_png)
+    check("cmd_visualize performance writes producer and consumer PNGs",
+          test_cmd_visualize_performance_writes_producer_and_consumer_pngs)
     check("save_contract_petri_net writes PNG",
           test_save_contract_petri_net_writes_png)
     check("cmd_visualize petri writes contract PNG",
