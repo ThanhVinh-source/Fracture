@@ -49,8 +49,54 @@ fracture bootstrap --key FRC-xxxx --no-activate
 fracture activate --key FRC-xxxx
 fracture run-all
 fracture status
+fracture dashboard
 python report.py
 ```
+
+---
+
+## Dashboard demo
+
+Fracture includes a local Streamlit dashboard for demo and review workflows.
+It reads the same local files as the CLI:
+
+- `conformance_log.csv` for fleet health, score history, timing zones, and patterns
+- `contracts/` for owner, criticality, SLA window, grain, and expected process
+- `inputs/` for producer/consumer event files when a visualization needs raw events
+- `outputs/visualizations/` for generated PNG artifacts
+
+Run the full local demo flow:
+
+```bash
+pip install -r requirements.txt
+pip install -e .
+
+python scripts/06_generate_team_contracts.py --clean --days 30
+fracture run-all --date 20260618
+fracture dashboard
+```
+
+If port `8501` is already in use:
+
+```bash
+fracture dashboard --port 8502
+```
+
+The dashboard currently has three pages:
+
+| Page | Purpose |
+|------|---------|
+| Fleet Overview | Current fleet health with filters for timing zone, pattern, confidence, and high-gap pipelines |
+| Pipeline Detail | Latest score, timing status, bilateral gap callout, score breakdown, variant explanation, and contract summary |
+| Visualizations | Auto-generates and displays gap timeline, drift chart, contract Petri net, and fleet heatmap |
+
+Dashboard symbols:
+
+- **Final score** is the weighted conformance score: sequence `0.35`, timing `0.50`, completeness `0.15`.
+- **GREEN / AMBER / RED** in the drift chart are final-score bands, not timing zones.
+- **Timing zone** is SLA-specific: GREEN before p95, AMBER between p95 and p99, RED inside grace after p99, BREACH after p99 plus grace.
+- **p50 / p95 / p99** are historical runtime percentiles stored in the contract.
+- **Bilateral gap** is consumer `DATA_AVAILABLE` minus producer `DATA_AVAILABLE`.
 
 ---
 
@@ -131,6 +177,7 @@ fracture/
   fracture/          13 modules
   tests/             9 test suites
   scripts/           Setup and data generation
+  dashboard.py       Streamlit dashboard
   clustering.py      Fleet clustering (k-Means + DBSCAN + ARI)
   report.py          Fleet health report
   hypothesis_test.py H0: pipeline age vs drift velocity

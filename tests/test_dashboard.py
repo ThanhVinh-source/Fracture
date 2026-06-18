@@ -1,0 +1,176 @@
+"""
+tests/test_dashboard.py
+
+Smoke tests for the Phase 4 Streamlit dashboard.
+
+These tests do not start a Streamlit server. They only verify that the
+dashboard module imports and that helper functions handle missing files,
+empty values, and basic dashboard data shapes safely.
+"""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import pandas as pd
+
+import dashboard
+
+
+passed = 0
+failed = 0
+
+
+def check(name, fn):
+    global passed, failed
+    try:
+        fn()
+        passed += 1
+        print(f"v {name}")
+    except AssertionError as e:
+        failed += 1
+        print(f"x {name}")
+        print(f"  {e}")
+    except Exception as e:
+        failed += 1
+        print(f"x {name}: {type(e).__name__}: {e}")
+
+
+def test_dashboard_module_imports():
+    # Importing dashboard should expose the expected Phase 4 entry points.
+    assert callable(dashboard.main)
+    assert callable(dashboard.render_fleet_overview)
+    assert callable(dashboard.render_pipeline_detail)
+    assert callable(dashboard.render_visualizations)
+
+
+def test_format_score_handles_numbers_and_empty_values():
+    # Dashboard scores come from CSV, so values may be numeric, strings, or empty.
+    assert dashboard.format_score(0.9876) == "0.99"
+    assert dashboard.format_score("1.0048") == "1.00"
+    assert dashboard.format_score(None) == "n/a"
+    assert dashboard.format_score("not-a-number") == "n/a"
+
+
+def test_numeric_value_handles_missing_and_bad_values():
+    row = pd.Series({
+        "bilateral_gap_minutes": "14.2",
+        "bad_value": "n/a",
+    })
+
+    # Numeric strings become floats for warnings and metric cards.
+    assert dashboard.numeric_value(row, "bilateral_gap_minutes") == 14.2
+
+    # Bad or missing values become None instead of crashing.
+    assert dashboard.numeric_value(row, "bad_value") is None
+    assert dashboard.numeric_value(row, "missing_column") is None
+
+
+def test_sorted_filter_options_drops_empty_values():
+    df = pd.DataFrame({
+        "timing_zone": ["GREEN", "AMBER", "GREEN", "", None],
+    })
+
+    assert dashboard.sorted_filter_options(df, "timing_zone") == [
+        "AMBER",
+        "GREEN",
+    ]
+    assert dashboard.sorted_filter_options(df, "missing") == []
+
+
+def test_get_pipeline_options_prefers_conformance_history():
+    df = pd.DataFrame({
+        "pipeline_id": ["z_pipeline", "a_pipeline", "z_pipeline"],
+    })
+
+    # conformance_log.csv history is the preferred pipeline selector source.
+    assert dashboard.get_pipeline_options(df) == [
+        "a_pipeline",
+        "z_pipeline",
+    ]
+
+
+def test_get_pipeline_options_falls_back_to_visualization_folders():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        original_root = dashboard.VISUALIZATION_ROOT
+
+        # Point the dashboard helper at an isolated fake output directory.
+        dashboard.VISUALIZATION_ROOT = tmp / "outputs" / "visualizations"
+        (dashboard.VISUALIZATION_ROOT / "beta_pipeline").mkdir(parents=True)
+        (dashboard.VISUALIZATION_ROOT / "alpha_pipeline").mkdir(parents=True)
+        (dashboard.VISUALIZATION_ROOT / "fleet_heatmap.png").write_text("fake")
+
+        assert dashboard.get_pipeline_options(pd.DataFrame()) == [
+            "alpha_pipeline",
+            "beta_pipeline",
+        ]
+    finally:
+        dashboard.VISUALIZATION_ROOT = original_root
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_pipeline_contract_missing_file_is_safe():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        original_contracts_root = dashboard.CONTRACTS_ROOT
+
+        # Missing contracts should produce a clear status, not an exception.
+        dashboard.CONTRACTS_ROOT = tmp / "contracts"
+        contract, status = dashboard.load_pipeline_contract("missing_pipeline")
+
+        assert contract is None
+        assert "missing contract" in status
+    finally:
+        dashboard.CONTRACTS_ROOT = original_contracts_root
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_dashboard_cli_help_works():
+    # The CLI route should exist without starting a Streamlit server.
+    result = subprocess.run(
+        [sys.executable, "-m", "fracture.cli", "dashboard", "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "usage: fracture dashboard" in result.stdout
+    assert "--port" in result.stdout
+
+
+if __name__ == "__main__":
+    print()
+    print("Phase 4 dashboard smoke tests")
+    print("=" * 40)
+
+    check("dashboard module imports", test_dashboard_module_imports)
+    check("format_score handles numbers and empty values",
+          test_format_score_handles_numbers_and_empty_values)
+    check("numeric_value handles missing and bad values",
+          test_numeric_value_handles_missing_and_bad_values)
+    check("sorted_filter_options drops empty values",
+          test_sorted_filter_options_drops_empty_values)
+    check("get_pipeline_options prefers conformance history",
+          test_get_pipeline_options_prefers_conformance_history)
+    check("get_pipeline_options falls back to visualization folders",
+          test_get_pipeline_options_falls_back_to_visualization_folders)
+    check("load_pipeline_contract missing file is safe",
+          test_load_pipeline_contract_missing_file_is_safe)
+    check("dashboard CLI help works", test_dashboard_cli_help_works)
+
+    print()
+    print(f"Results: {passed + failed} tests  v {passed}  x {failed}")
+
+    if failed:
+        raise SystemExit(1)
