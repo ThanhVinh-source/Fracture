@@ -12,7 +12,8 @@ This file is the UI layer. It should stay lightweight:
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
+import json
 from pathlib import Path
 import re
 from typing import Optional
@@ -638,6 +639,263 @@ def render_visualization_image(path: Path, title: str, missing_hint: str):
     st.info(missing_hint)
 
 
+def load_json_artifact(path: Path) -> tuple[dict, str]:
+    """
+    Load a structured process-mining JSON artifact safely.
+
+    Prediction and recommendation commands write JSON beside PNG artifacts.
+    The dashboard should read those files directly, but missing/invalid JSON
+    should become a visible dashboard status instead of a Streamlit crash.
+    """
+    if not path.exists():
+        return {}, f"missing artifact: {path}"
+
+    try:
+        # Keep encoding explicit so the dashboard behaves the same on macOS,
+        # Linux, and CI machines.
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        return {}, f"invalid artifact: {e}"
+
+    if not isinstance(payload, dict):
+        # All Fracture process-mining artifacts are JSON objects at the top
+        # level. Lists/scalars usually mean the wrong file was selected.
+        return {}, "invalid artifact: expected a JSON object"
+
+    return payload, "ok"
+
+
+def format_artifact_value(value, ndigits: int = 2) -> str:
+    """
+    Format JSON metric values for compact dashboard cards and tables.
+
+    JSON artifacts can contain None/NaN when prediction is unavailable, so this
+    helper mirrors format_score but works for generic metrics too.
+    """
+    if value is None:
+        return "n/a"
+
+    try:
+        if pd.isna(value):
+            return "n/a"
+    except Exception:
+        pass
+
+    try:
+        return f"{float(value):.{ndigits}f}"
+    except Exception:
+        return str(value)
+
+
+def highest_recommendation_severity(recommendations: list[dict]) -> str:
+    """
+    Return the strongest action severity in a recommendation artifact.
+
+    This gives the dashboard a single headline severity while still showing all
+    detailed recommendation rows below.
+    """
+    severity_rank = {
+        "INFO": 0,
+        "WATCH": 1,
+        "ACTION": 2,
+        "URGENT": 3,
+        "BLOCKED": 4,
+    }
+
+    if not recommendations:
+        return "n/a"
+
+    return max(
+        (str(item.get("severity", "INFO")).upper() for item in recommendations),
+        key=lambda severity: severity_rank.get(severity, -1),
+    )
+
+
+def render_artifact_command(command: str):
+    """
+    Show the CLI command that creates a missing dashboard artifact.
+
+    The dashboard is allowed to be opened before every artifact exists, so a
+    short command keeps the recovery path obvious during demos.
+    """
+    st.code(command, language="bash")
+
+
+def save_json_artifact(payload: dict, pipeline_id: str, filename: str) -> Path:
+    """
+    Persist a dashboard-generated JSON artifact beside PNG visualizations.
+
+    The CLI also writes these files. This small dashboard writer exists so the
+    Streamlit page can regenerate missing prediction/action artifacts without
+    importing CLI command handlers.
+    """
+    pipeline_dir = VISUALIZATION_ROOT / pipeline_id
+    pipeline_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy before adding metadata so caller-owned dictionaries are not mutated.
+    output_payload = dict(payload)
+    output_payload["generated_at"] = datetime.now().isoformat()
+
+    output_path = pipeline_dir / filename
+    output_path.write_text(
+        json.dumps(output_payload, indent=2, default=str) + "\n",
+        encoding="utf-8",
+    )
+
+    return output_path
+
+
+def render_prediction_artifact(payload: dict, status: str, pipeline_id: str):
+    """
+    Render predictive process-mining output from prediction.json.
+
+    Prediction answers whether the pipeline is drifting toward a future score
+    breach or widening producer-consumer gap.
+    """
+    st.subheader("Prediction")
+
+    if not payload:
+        st.info("No prediction artifact exported yet.")
+        st.caption(status)
+        render_artifact_command(
+            f"python -m fracture.cli predict --pipeline-id {pipeline_id}"
+        )
+        return
+
+    artifact_status = str(payload.get("status", "unknown"))
+    metrics = payload.get("metrics", {}) or {}
+    predictions = payload.get("predictions", []) or []
+    findings = payload.get("findings", []) or []
+
+    if artifact_status == "ok":
+        st.success("Prediction artifact loaded.")
+    else:
+        # Non-ok artifacts are still useful: they explain why prediction was
+        # skipped, for example low confidence or insufficient history.
+        st.warning(f"Prediction status: {artifact_status}")
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Status", artifact_status)
+    col2.metric(
+        "Score points",
+        f"{metrics.get('available_score_points', 0)}/"
+        f"{metrics.get('required_score_points', 'n/a')}",
+    )
+    col3.metric(
+        "Gap points",
+        f"{metrics.get('available_gap_points', 0)}/"
+        f"{metrics.get('required_gap_points', 'n/a')}",
+    )
+    col4.metric(
+        "Latest gap",
+        f"{format_artifact_value(metrics.get('latest_gap_minutes'))} min",
+    )
+
+    trend_col1, trend_col2, trend_col3 = st.columns(3)
+    trend_col1.metric(
+        "Score slope/day",
+        format_artifact_value(metrics.get("score_slope_per_day"), ndigits=4),
+    )
+    trend_col2.metric(
+        "Gap slope/day",
+        format_artifact_value(metrics.get("gap_slope_minutes_per_day"), ndigits=4),
+    )
+    trend_col3.metric(
+        "Latest confidence",
+        metrics.get("latest_confidence_level", "n/a"),
+    )
+
+    if predictions:
+        # Keep the table compact: it should show decision-relevant fields, not
+        # every internal detail from the JSON payload.
+        prediction_rows = []
+        for item in predictions:
+            prediction_rows.append({
+                "type": item.get("prediction_type", ""),
+                "projected_date": item.get("projected_date") or "n/a",
+                "days": format_artifact_value(
+                    item.get("days_until_projection"),
+                    ndigits=0,
+                ),
+                "confidence": item.get("confidence", ""),
+                "urgency": item.get("urgency", ""),
+                "threshold": format_artifact_value(item.get("threshold")),
+                "slope": format_artifact_value(item.get("slope_per_day"), ndigits=4),
+                "explanation": item.get("explanation", ""),
+            })
+
+        st.table(pd.DataFrame(prediction_rows))
+    else:
+        st.info("No active projection was returned for this pipeline.")
+
+    if findings:
+        st.markdown("**Findings**")
+        for finding in findings:
+            st.write(f"- {finding}")
+
+
+def render_recommendation_artifact(payload: dict, status: str, pipeline_id: str):
+    """
+    Render action-oriented process-mining output from recommendations.json.
+
+    Recommendations translate diagnostics into owner, severity, likely cause,
+    concrete action, and the next CLI command to run.
+    """
+    st.subheader("Actions")
+
+    if not payload:
+        st.info("No recommendation artifact exported yet.")
+        st.caption(status)
+        render_artifact_command(
+            f"python -m fracture.cli recommend --pipeline-id {pipeline_id}"
+        )
+        return
+
+    artifact_status = str(payload.get("status", "unknown"))
+    metrics = payload.get("metrics", {}) or {}
+    recommendations = payload.get("recommendations", []) or []
+    highest_severity = highest_recommendation_severity(recommendations)
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Status", artifact_status)
+    col2.metric("Recommendations", len(recommendations))
+    col3.metric("Highest severity", highest_severity)
+    col4.metric("Latest zone", metrics.get("timing_zone", "n/a"))
+
+    if not recommendations:
+        st.success("No action recommendation is currently needed.")
+        return
+
+    for item in recommendations:
+        severity = str(item.get("severity", "INFO")).upper()
+        message = f"[{severity}] {item.get('finding', '')}"
+
+        # Severity uses visible Streamlit states so the most urgent action is
+        # easy to spot before reading the detailed table.
+        if severity in {"URGENT", "BLOCKED"}:
+            st.error(message)
+        elif severity == "ACTION":
+            st.warning(message)
+        elif severity == "WATCH":
+            st.info(message)
+        else:
+            st.success(message)
+
+    recommendation_rows = []
+    for item in recommendations:
+        recommendation_rows.append({
+            "severity": item.get("severity", ""),
+            "owner": item.get("owner", ""),
+            "finding": item.get("finding", ""),
+            "probable_cause": item.get("probable_cause", ""),
+            "recommended_action": item.get("recommended_action", ""),
+            "next_command": item.get("next_command", ""),
+            "confidence": item.get("confidence", ""),
+        })
+
+    st.table(pd.DataFrame(recommendation_rows))
+
+
 def load_pipeline_contract(pipeline_id: str):
     """
     Load one contract object for visualization generation.
@@ -854,6 +1112,51 @@ def ensure_visualizations_for_pipeline(
                     else f"execution drift consumer created: {path}"
                 )
 
+    prediction_path = pipeline_dir / "prediction.json"
+    recommendation_path = pipeline_dir / "recommendations.json"
+    if force or not prediction_path.exists() or not recommendation_path.exists():
+        if conformance_df.empty:
+            statuses.append("prediction/actions skipped: conformance_log.csv unavailable")
+        else:
+            try:
+                from fracture.prediction import predict_pipeline
+                from fracture.recommendation import recommend_pipeline
+
+                # Prediction uses the scored conformance history, not raw event
+                # logs. Even a skipped prediction is saved so the dashboard can
+                # explain "insufficient history" or "low confidence".
+                prediction_result = predict_pipeline(
+                    conformance_df=conformance_df,
+                    pipeline_id=pipeline_id,
+                )
+                prediction_output = save_json_artifact(
+                    prediction_result.as_dict(),
+                    pipeline_id=pipeline_id,
+                    filename="prediction.json",
+                )
+                statuses.append(f"prediction created: {prediction_output}")
+
+                # Prefer contract owner for the action route. If the contract
+                # is missing, the recommendation module falls back to log owner
+                # columns or a generic pipeline owner.
+                recommendation_owner = contract.owner if contract is not None else None
+                recommendation_result = recommend_pipeline(
+                    conformance_df=conformance_df,
+                    pipeline_id=pipeline_id,
+                    prediction_result=prediction_result,
+                    owner=recommendation_owner,
+                )
+                recommendation_output = save_json_artifact(
+                    recommendation_result.as_dict(),
+                    pipeline_id=pipeline_id,
+                    filename="recommendations.json",
+                )
+                statuses.append(f"recommendations created: {recommendation_output}")
+            except Exception as e:
+                # The rest of the dashboard should remain usable even if the
+                # analytical JSON artifacts cannot be produced.
+                statuses.append(f"prediction/actions skipped: {e}")
+
     heatmap_path = VISUALIZATION_ROOT / "fleet_heatmap.png"
     if force or not heatmap_path.exists():
         if conformance_df.empty:
@@ -996,12 +1299,13 @@ def render_visualizations(conformance_df: pd.DataFrame):
         available_input_dates=available_dates,
     )
 
-    gap_tab, drift_tab, petri_tab, dfg_tab, performance_tab, heatmap_tab = st.tabs([
+    gap_tab, drift_tab, petri_tab, dfg_tab, performance_tab, actions_tab, heatmap_tab = st.tabs([
         "Bilateral Gap",
         "Drift",
         "Petri Net",
         "Discovered DFG",
         "Performance DFG",
+        "Prediction & Actions",
         "Fleet Heatmap",
     ])
 
@@ -1071,6 +1375,33 @@ def render_visualizations(conformance_df: pd.DataFrame):
             pipeline_dir / "execution_time_drift_consumer.png",
             "Consumer Execution Time Drift",
             "No consumer execution time drift exported yet.",
+        )
+
+    with actions_tab:
+        st.caption(
+            "Prediction reads conformance history. Actions translate the latest "
+            "diagnostics into severity, owner, suggested fix, and next command."
+        )
+
+        prediction_payload, prediction_status = load_json_artifact(
+            pipeline_dir / "prediction.json"
+        )
+        recommendation_payload, recommendation_status = load_json_artifact(
+            pipeline_dir / "recommendations.json"
+        )
+
+        render_prediction_artifact(
+            payload=prediction_payload,
+            status=prediction_status,
+            pipeline_id=selected_pipeline,
+        )
+
+        st.divider()
+
+        render_recommendation_artifact(
+            payload=recommendation_payload,
+            status=recommendation_status,
+            pipeline_id=selected_pipeline,
         )
 
     with heatmap_tab:

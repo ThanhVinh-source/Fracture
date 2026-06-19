@@ -10,6 +10,7 @@ empty values, and basic dashboard data shapes safely.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -136,6 +137,71 @@ def test_load_pipeline_contract_missing_file_is_safe():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_load_json_artifact_missing_file_is_safe():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        payload, status = dashboard.load_json_artifact(
+            tmp / "outputs" / "prediction.json"
+        )
+
+        # Missing prediction/recommendation artifacts should show a dashboard
+        # hint instead of crashing the Streamlit page.
+        assert payload == {}
+        assert "missing artifact" in status
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_load_json_artifact_reads_valid_json():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        artifact_path = tmp / "recommendations.json"
+        artifact_path.write_text(
+            json.dumps({
+                "pipeline_id": "payment_batch",
+                "status": "ok",
+                "recommendations": [],
+            }),
+            encoding="utf-8",
+        )
+
+        payload, status = dashboard.load_json_artifact(artifact_path)
+
+        # Dashboard JSON loader should preserve structured fields for cards
+        # and tables in the Prediction & Actions tab.
+        assert status == "ok"
+        assert payload["pipeline_id"] == "payment_batch"
+        assert payload["status"] == "ok"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_save_json_artifact_writes_pipeline_file():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        original_root = dashboard.VISUALIZATION_ROOT
+
+        # Point artifact writing at a temporary output root so the test does
+        # not touch real demo files in outputs/visualizations.
+        dashboard.VISUALIZATION_ROOT = tmp / "outputs" / "visualizations"
+        output_path = dashboard.save_json_artifact(
+            {"pipeline_id": "payment_batch", "status": "ok"},
+            pipeline_id="payment_batch",
+            filename="prediction.json",
+        )
+
+        payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+        assert output_path.exists()
+        assert output_path.name == "prediction.json"
+        assert payload["pipeline_id"] == "payment_batch"
+        assert payload["status"] == "ok"
+        assert "generated_at" in payload
+    finally:
+        dashboard.VISUALIZATION_ROOT = original_root
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_dashboard_cli_help_works():
     # The CLI route should exist without starting a Streamlit server.
     result = subprocess.run(
@@ -169,6 +235,12 @@ if __name__ == "__main__":
           test_get_pipeline_options_falls_back_to_visualization_folders)
     check("load_pipeline_contract missing file is safe",
           test_load_pipeline_contract_missing_file_is_safe)
+    check("load_json_artifact missing file is safe",
+          test_load_json_artifact_missing_file_is_safe)
+    check("load_json_artifact reads valid json",
+          test_load_json_artifact_reads_valid_json)
+    check("save_json_artifact writes pipeline file",
+          test_save_json_artifact_writes_pipeline_file)
     check("dashboard CLI help works", test_dashboard_cli_help_works)
 
     print()
