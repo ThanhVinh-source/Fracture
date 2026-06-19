@@ -34,9 +34,8 @@ Scenario coverage (see formula spec for full details):
 
 from __future__ import annotations
 
-import warnings
-from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -48,13 +47,10 @@ import pandas as pd
 from scipy.stats import linregress
 
 # PM4PY imports for process mining core
-import pm4py
 from pm4py.objects.log.obj import EventLog, Trace, Event
 from pm4py.algo.conformance.tokenreplay import algorithm as token_replay
-from pm4py.statistics.traces.generic.log import case_statistics
 
-from fracture.schema import (
-    PipelineContract, ContractStatus, )
+from fracture.schema import PipelineContract
 from fracture.config import FractureConfig, DEFAULT_CONFIG
 
 # ── Result dataclasses ────────────────────────────────────────────────────────
@@ -293,14 +289,14 @@ class ConformanceResult:
             if (self.diagnostics and
                     self.diagnostics.weekday_pattern.infrastructure_probable):
                 return (
-                    f"Fails on specific weekdays — infrastructure problem, "
-                    f"not pipeline problem. Route to platform-infrastructure."
+                    "Fails on specific weekdays — infrastructure problem, "
+                    "not pipeline problem. Route to platform-infrastructure."
                 )
-            return f"Intermittent failures. Investigate specific failure days."
+            return "Intermittent failures. Investigate specific failure days."
         if self.pattern == "DRIFTING":
             return (
-                f"Conformance declining. "
-                f"Schedule contract review with both teams this sprint."
+                "Conformance declining. "
+                "Schedule contract review with both teams this sprint."
             )
         if self.bilateral_gap_minutes and self.bilateral_gap_minutes > 10:
             return (
@@ -507,10 +503,16 @@ def _compute_confidence(
 
     ordering_quality = 1.0 - min(0.50, order_violations / max(len(events), 1))
 
-    # Factor 4: guard warning penalty
-    # Each warning reduces confidence by 0.15
-    # This connects guard outputs to the confidence score
-    warning_penalty = min(0.60, len(guard_warnings) * 0.15)
+    # Factor 4: warning and preflight quality.
+    # Runtime warnings use a generic penalty. Preflight AMBER checks use the
+    # exact confidence_delta defined in preflight.py, so a missing terminal
+    # event can reduce trust more than a small first-event mismatch.
+    generic_warning_penalty = len(guard_warnings) * 0.15
+    exact_preflight_penalty = abs(min(0.0, preflight_penalty))
+    warning_penalty = min(
+        0.60,
+        generic_warning_penalty + exact_preflight_penalty,
+    )
     warning_quality = 1.0 - warning_penalty
 
     # Confidence = minimum of all factors
@@ -539,6 +541,55 @@ def _compute_confidence(
         level = "UNRELIABLE"
 
     return round(base_confidence, 4), level
+
+
+def _compute_gap_drift_per_day(
+    historical_gaps: Optional[list[tuple[datetime, float]]] = None,
+    current_gap_minutes: Optional[float] = None,
+    current_events: Optional[pd.DataFrame] = None,
+) -> Optional[float]:
+    """
+    Estimate how quickly the producer-consumer handoff gap is changing.
+
+    The input history comes from conformance_log.csv. The current gap comes
+    from today's producer/consumer event files before today's row is appended
+    to the log. Grouping by calendar date keeps reruns on the same day from
+    pretending to be multiple separate days of drift.
+    """
+    points = []
+
+    for ts, gap in historical_gaps or []:
+        if gap is None:
+            continue
+        try:
+            points.append((pd.to_datetime(ts).date(), float(gap)))
+        except (TypeError, ValueError):
+            continue
+
+    if current_gap_minutes is not None and current_events is not None:
+        try:
+            current_ts = pd.to_datetime(
+                current_events["timestamp"], utc=True
+            ).max()
+            points.append((current_ts.date(), float(current_gap_minutes)))
+        except (KeyError, TypeError, ValueError):
+            pass
+
+    if len(points) < 3:
+        return None
+
+    # Keep the latest value per date. This makes rerunning the same date safe
+    # while preserving the natural chronological order for the trend.
+    daily = {}
+    for day, gap in sorted(points, key=lambda item: item[0]):
+        daily[day] = gap
+
+    gaps = list(daily.values())
+    if len(gaps) < 3:
+        return None
+
+    slope = float(np.polyfit(range(len(gaps)), np.array(gaps), 1)[0])
+    return round(slope, 6)
 
 
 # ── Weekday pattern detection ─────────────────────────────────────────────────
@@ -1248,6 +1299,7 @@ def compute_conformance(
     config:           FractureConfig = DEFAULT_CONFIG,
     consumer_events:  Optional[pd.DataFrame] = None,
     historical_scores: Optional[list[tuple[datetime, float]]] = None,
+    historical_gaps: Optional[list[tuple[datetime, float]]] = None,
 ) -> ConformanceResult:
     """
     Compute full bilateral conformance for one pipeline.
@@ -1260,8 +1312,11 @@ def compute_conformance(
     config           : FractureConfig with all tunable parameters.
     consumer_events  : Optional consumer-side event log for bilateral comparison.
                        If None, bilateral gap is not computed.
-                       previous runs. Used for drift and weekday analysis.
-                       If None, pattern detection is limited.
+    historical_scores: Previous conformance scores from conformance_log.csv.
+                       Used for drift and weekday analysis.
+    historical_gaps  : Previous bilateral gaps from conformance_log.csv.
+                       Used to compute gap_drift_per_day.
+                       If None, gap drift remains unavailable.
 
     Returns
     -------
@@ -1291,7 +1346,7 @@ def compute_conformance(
     #
     # This means a broken consumer log never invalidates a valid
     # producer conformance measurement.
-    from fracture.preflight import run_preflight, PreflightResult
+    from fracture.preflight import run_preflight
 
     # Step 1a: Producer preflight — blocks entire computation on RED
     producer_preflight = run_preflight(producer_events, contract)
@@ -1321,7 +1376,10 @@ def compute_conformance(
             # the producer's sequence fitness measurement.
             consumer_preflight_penalty = cons_preflight.confidence_penalty * 0.5
 
-    guard_warnings = [c.message for c in producer_preflight.amber_checks]
+    # Preflight penalties are applied with their exact confidence_delta below.
+    # Keep guard_warnings for runtime warnings that do not come from preflight,
+    # such as a PM4PY token replay fallback.
+    guard_warnings = []
 
     # Total preflight penalty = producer AMBER + half consumer AMBER
     total_preflight_penalty = (
@@ -1424,10 +1482,12 @@ def compute_conformance(
         guard_warnings=guard_warnings,
         contract=contract,
         days_of_history=days_of_history,
+        preflight_penalty=total_preflight_penalty,
     )
 
     # ── Step 9: Variance and pattern analysis + temporal features ──────
-    # historical_scores = [(datetime, float), ...] loaded from CSV by CLI
+    # historical_scores = [(datetime, float), ...] loaded from CSV by CLI.
+    # historical_gaps   = [(datetime, float), ...] loaded from the same log.
     # These temporal features are computed ONCE here and written to the
     # CSV row so clustering.py reads them directly — no recalculation.
 
@@ -1454,9 +1514,6 @@ def compute_conformance(
             mean_score_historical = round(mean_s, 4)
             min_score_historical  = round(float(np.min(arr)), 4)
 
-        # Gap drift — slope of bilateral gap over time (needs gap history)
-        # Gap history not currently stored in conformance_log — future work
-        # For now: derive from bilateral_gap_trend string
     else:
         pattern, cv = "STABLE", 0.0
 
@@ -1555,6 +1612,14 @@ def compute_conformance(
             if len(gaps_series) >= 10:
                 changepoint = detect_gap_changepoint(gaps_series)
 
+    # Gap drift is computed after bilateral gap because today's current gap is
+    # only known once producer and consumer DATA_AVAILABLE events are matched.
+    gap_drift_per_day = _compute_gap_drift_per_day(
+        historical_gaps=historical_gaps,
+        current_gap_minutes=bilateral_gap,
+        current_events=producer_events,
+    )
+
     # ── Step 12b: Process variant comparison ─────────────────
     # When sequence fitness is low, compare normative vs discovered process.
     # This tells the engineer WHY fitness is low, not just HOW low it is.
@@ -1608,6 +1673,7 @@ def compute_conformance(
             temporal_variance_cv   = temporal_variance_cv,
             drift_rate_per_day     = drift_rate_per_day,
             score_range            = score_range,
+            gap_drift_per_day      = gap_drift_per_day,
             mean_score_historical  = mean_score_historical,
             min_score_historical   = min_score_historical,
         ),

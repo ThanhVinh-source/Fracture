@@ -1004,6 +1004,52 @@ def _load_historical_scores(pipeline_id: str, grain: str = 'pipeline') -> list:
         return sorted(scores, key=lambda x: x[0])
 
 
+def _load_historical_gaps(pipeline_id: str, grain: str = 'pipeline') -> list:
+    """
+    Load historical bilateral gaps from conformance_log.csv.
+
+    The conformance engine uses this to compute gap_drift_per_day, which is
+    the slope of the producer-consumer handoff gap over time. Keeping this
+    loader next to _load_historical_scores makes the CLI history contract
+    explicit: scores drive score drift, gaps drive gap drift.
+    """
+    rows = _read_log_rows()
+    pipeline_rows = [r for r in rows if r.get('pipeline_id') == pipeline_id
+                     and r.get('bilateral_gap_minutes')]
+
+    if not pipeline_rows:
+        return []
+
+    if grain in ('trade', 'record'):
+        # Daily aggregates: group by run_date, take mean bilateral gap.
+        # This avoids treating many trade-level rows from one day as many
+        # separate days of process drift.
+        from collections import defaultdict
+        daily = defaultdict(list)
+        for r in pipeline_rows:
+            try:
+                gap = float(r['bilateral_gap_minutes'])
+                rd  = datetime.strptime(r['run_date'], '%Y%m%d')
+                daily[rd.date()].append(gap)
+            except (ValueError, KeyError):
+                continue
+        return sorted(
+            [(datetime.combine(d, datetime.min.time()), sum(gaps)/len(gaps))
+             for d, gaps in daily.items()],
+            key=lambda x: x[0]
+        )
+
+    gaps = []
+    for r in pipeline_rows:
+        try:
+            gap = float(r['bilateral_gap_minutes'])
+            rd  = datetime.strptime(r['run_date'], '%Y%m%d')
+            gaps.append((rd, gap))
+        except (ValueError, KeyError):
+            continue
+    return sorted(gaps, key=lambda x: x[0])
+
+
 def cmd_run(args):
     """
     Run conformance for one pipeline.
@@ -1034,6 +1080,7 @@ def cmd_run(args):
             pass
 
     historical = _load_historical_scores(pipeline_id, grain)
+    historical_gaps = _load_historical_gaps(pipeline_id, grain)
 
     from fracture.engine import FractureEngine
     engine = FractureEngine(
@@ -1042,8 +1089,9 @@ def cmd_run(args):
     )
     result = engine.run_pipeline(
         pipeline_id,
-        date_str         = run_date,
+        date_str          = run_date,
         historical_scores = historical,
+        historical_gaps   = historical_gaps,
     )
 
     _print_result_full(result)
@@ -1120,8 +1168,13 @@ def cmd_run_all(args):
             pass  # if we cannot read the YAML, let the engine handle it
 
         hist_scores = _load_historical_scores(pid)
-        result = engine.run_pipeline(pid, date_str=run_date,
-                                     historical_scores=hist_scores)
+        hist_gaps   = _load_historical_gaps(pid)
+        result = engine.run_pipeline(
+            pid,
+            date_str=run_date,
+            historical_scores=hist_scores,
+            historical_gaps=hist_gaps,
+        )
         key    = _get_key_for_pipeline(pid)
         row    = _result_to_row(pid, key, result, run_date)
         _append_log(row)

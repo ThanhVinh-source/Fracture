@@ -19,7 +19,7 @@ import pytest
 from fracture.schema import LogContract, PipelineContract, Criticality, ContractStatus
 from fracture.ingest import normalize_events
 from fracture.config import FractureConfig
-from fracture.conformance import compute_conformance
+from fracture.conformance import compute_conformance, _compute_confidence
 from fracture.cli import LOG_COLUMNS, _result_to_row
 from fracture.engine import PipelineRunResult
 
@@ -189,6 +189,105 @@ def test_runtime_uses_contract_optional_activities_for_token_replay():
 
     assert result.diagnostics.sequence_fitness == 1.0
 
+
+def test_preflight_penalty_reduces_confidence_score():
+    contract = make_contract(
+        required_events=["SCHEDULED", "STARTED", "COMPLETED"],
+        terminal_event="COMPLETED",
+    )
+    base = datetime(2026, 1, 1, 6, 0, tzinfo=timezone.utc)
+    events = pd.DataFrame([
+        {"pipeline_run_id": "run_1", "activity": "SCHEDULED", "timestamp": base, "team": "producer"},
+        {"pipeline_run_id": "run_1", "activity": "STARTED", "timestamp": base + timedelta(minutes=1), "team": "producer"},
+        {"pipeline_run_id": "run_1", "activity": "COMPLETED", "timestamp": base + timedelta(minutes=40), "team": "producer"},
+    ])
+
+    # Preflight confidence deltas are negative numbers.
+    # A -0.20 AMBER penalty should lower an otherwise perfect confidence
+    # score from 1.00 to 0.80 and therefore classify as MEDIUM.
+    confidence, level = _compute_confidence(
+        events=events,
+        contract=contract,
+        guard_warnings=[],
+        days_of_history=30,
+        preflight_penalty=-0.20,
+    )
+
+    assert confidence == 0.8
+    assert level == "MEDIUM"
+
+
+def test_runtime_applies_consumer_preflight_penalty_to_confidence():
+    contract = make_contract(
+        required_events=["SCHEDULED", "STARTED", "COMPLETED", "DATA_AVAILABLE"],
+        terminal_event="COMPLETED",
+    )
+    base = datetime(2026, 1, 1, 6, 0, tzinfo=timezone.utc)
+    producer_events = pd.DataFrame([
+        {"pipeline_run_id": "run_1", "activity": "SCHEDULED", "timestamp": base, "team": "producer"},
+        {"pipeline_run_id": "run_1", "activity": "STARTED", "timestamp": base + timedelta(minutes=1), "team": "producer"},
+        {"pipeline_run_id": "run_1", "activity": "COMPLETED", "timestamp": base + timedelta(minutes=40), "team": "producer"},
+        {"pipeline_run_id": "run_1", "activity": "DATA_AVAILABLE", "timestamp": base + timedelta(minutes=42), "team": "producer"},
+    ])
+    consumer_events = pd.DataFrame([
+        {"pipeline_run_id": "run_1", "activity": "SCHEDULED", "timestamp": base, "team": "consumer"},
+        {"pipeline_run_id": "run_1", "activity": "STARTED", "timestamp": base + timedelta(minutes=2), "team": "consumer"},
+        {"pipeline_run_id": "run_1", "activity": "DATA_AVAILABLE", "timestamp": base + timedelta(minutes=50), "team": "consumer"},
+    ])
+
+    # The consumer log is missing the terminal event, which is AMBER rather
+    # than RED. Fracture should still compute producer conformance, but the
+    # bilateral measurement is less trustworthy, so consumer penalty applies
+    # at half weight and lowers confidence from HIGH to MEDIUM.
+    result = compute_conformance(
+        producer_events=producer_events,
+        consumer_events=consumer_events,
+        contract=contract,
+        config=FractureConfig(),
+    )
+
+    assert result.confidence_level == "MEDIUM"
+
+
+def test_runtime_computes_gap_drift_per_day_from_history():
+    contract = make_contract(
+        required_events=["SCHEDULED", "STARTED", "COMPLETED", "DATA_AVAILABLE"],
+        terminal_event="COMPLETED",
+    )
+    base = datetime(2026, 1, 4, 6, 0, tzinfo=timezone.utc)
+    producer_events = pd.DataFrame([
+        {"pipeline_run_id": "run_4", "activity": "SCHEDULED", "timestamp": base, "team": "producer"},
+        {"pipeline_run_id": "run_4", "activity": "STARTED", "timestamp": base + timedelta(minutes=1), "team": "producer"},
+        {"pipeline_run_id": "run_4", "activity": "COMPLETED", "timestamp": base + timedelta(minutes=40), "team": "producer"},
+        {"pipeline_run_id": "run_4", "activity": "DATA_AVAILABLE", "timestamp": base + timedelta(minutes=42), "team": "producer"},
+    ])
+    consumer_events = pd.DataFrame([
+        {"pipeline_run_id": "run_4", "activity": "SCHEDULED", "timestamp": base, "team": "consumer"},
+        {"pipeline_run_id": "run_4", "activity": "STARTED", "timestamp": base + timedelta(minutes=1), "team": "consumer"},
+        {"pipeline_run_id": "run_4", "activity": "COMPLETED", "timestamp": base + timedelta(minutes=45), "team": "consumer"},
+        {"pipeline_run_id": "run_4", "activity": "DATA_AVAILABLE", "timestamp": base + timedelta(minutes=82), "team": "consumer"},
+    ])
+    historical_gaps = [
+        (base - timedelta(days=3), 10.0),
+        (base - timedelta(days=2), 20.0),
+        (base - timedelta(days=1), 30.0),
+    ]
+
+    # Historical gaps plus today's 40-minute bilateral gap form a clean
+    # +10 minutes/day slope. This protects the CSV/dashboard diagnostic field
+    # from staying empty after enough gap history exists.
+    result = compute_conformance(
+        producer_events=producer_events,
+        consumer_events=consumer_events,
+        contract=contract,
+        config=FractureConfig(),
+        historical_gaps=historical_gaps,
+    )
+
+    assert result.bilateral_gap_minutes == 40.0
+    assert result.diagnostics.gap_drift_per_day == 10.0
+
+
 def test_log_columns_include_visualization_ready_diagnostics():
     expected = {
         "bilateral_gap_trend",
@@ -259,6 +358,15 @@ if __name__ == "__main__":
 
     test_runtime_uses_contract_optional_activities_for_token_replay()
     print("v runtime uses contract optional_activities for token replay")
+
+    test_preflight_penalty_reduces_confidence_score()
+    print("v preflight penalty reduces confidence score")
+
+    test_runtime_applies_consumer_preflight_penalty_to_confidence()
+    print("v runtime applies consumer preflight penalty to confidence")
+
+    test_runtime_computes_gap_drift_per_day_from_history()
+    print("v runtime computes gap_drift_per_day from history")
 
     test_log_columns_include_visualization_ready_diagnostics()
     print("v log columns include visualization-ready diagnostics")

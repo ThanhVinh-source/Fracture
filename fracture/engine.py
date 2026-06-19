@@ -382,6 +382,7 @@ class FractureEngine:
         self,
         pipeline_id:       str,
         historical_scores: Optional[list] = None,
+        historical_gaps:   Optional[list] = None,
         date_str:          Optional[str]  = None,
     ) -> PipelineRunResult:
         """
@@ -540,6 +541,7 @@ class FractureEngine:
                 config            = self.config,
                 consumer_events   = consumer_events,
                 historical_scores = historical_scores,
+                historical_gaps   = historical_gaps,
             )
         except DraftContractError as e:
             return PipelineRunResult(
@@ -581,6 +583,7 @@ class FractureEngine:
         self,
         pipeline_ids:      Optional[list[str]] = None,
         historical_scores: Optional[dict]      = None,
+        historical_gaps:   Optional[dict]      = None,
     ) -> FleetResult:
         """
         Run conformance for all registered pipelines.
@@ -591,6 +594,8 @@ class FractureEngine:
 
         historical_scores: optional dict mapping pipeline_id to
         list of (datetime, float) tuples for drift analysis.
+        historical_gaps: optional dict mapping pipeline_id to
+        list of (datetime, float) tuples for bilateral gap drift.
         """
         import time
         t_start = time.time()
@@ -617,8 +622,15 @@ class FractureEngine:
             hist = None
             if historical_scores and pid in historical_scores:
                 hist = historical_scores[pid]
+            hist_gaps = None
+            if historical_gaps and pid in historical_gaps:
+                hist_gaps = historical_gaps[pid]
 
-            result = self.run_pipeline(pid, historical_scores=hist)
+            result = self.run_pipeline(
+                pid,
+                historical_scores=hist,
+                historical_gaps=hist_gaps,
+            )
             results.append(result)
 
         total_ms = round((time.time() - t_start) * 1000, 2)
@@ -656,5 +668,4 @@ class FractureEngine:
                 "valid":   False,
                 "errors":  [str(e)],
             }
-
 
