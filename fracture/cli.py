@@ -2227,6 +2227,74 @@ def cmd_predict(args):
     return 0 if result.status == "ok" else 1
 
 
+def cmd_recommend(args):
+    """
+    Run action-oriented process mining for one pipeline.
+
+    Recommendation reads conformance_log.csv and optionally reuses the
+    deterministic prediction helper so the output can include future risk.
+    """
+    pipeline_id = _resolve_pipeline(args)
+    if not pipeline_id:
+        return 1
+
+    from fracture.prediction import predict_pipeline
+    from fracture.recommendation import (
+        format_recommendation_result,
+        recommend_pipeline,
+    )
+
+    print()
+    print(f"  Recommending: {pipeline_id}")
+    print(f"  Log         : {args.log_path}")
+
+    log_path = Path(args.log_path)
+    if not log_path.exists():
+        print()
+        print(f"  Cannot recommend: missing {log_path}")
+        print("  Run conformance first: fracture run-all")
+        return 1
+
+    import pandas as pd
+
+    conformance_df = pd.read_csv(log_path)
+
+    owner = None
+    contract_path = Path(getattr(args, "contracts_dir", "contracts")) / f"{pipeline_id}.yaml"
+    if contract_path.exists():
+        try:
+            # Contract owner is the best available route for action-oriented
+            # recommendations. If loading fails, fall back to log alert_owner.
+            from fracture.schema import load_contract
+            owner = load_contract(str(contract_path)).owner
+        except Exception:
+            owner = None
+
+    # Prediction is an optional signal. If there is not enough history,
+    # recommendation still uses the latest measured conformance row.
+    prediction_result = None
+    if not args.skip_prediction:
+        prediction_result = predict_pipeline(
+            conformance_df=conformance_df,
+            pipeline_id=pipeline_id,
+            min_score_points=args.min_score_points,
+            min_gap_points=args.min_gap_points,
+        )
+
+    result = recommend_pipeline(
+        conformance_df=conformance_df,
+        pipeline_id=pipeline_id,
+        prediction_result=prediction_result,
+        owner=owner,
+    )
+
+    print()
+    for line in format_recommendation_result(result).splitlines():
+        print(f"  {line}" if line else "")
+
+    return 0 if result.status == "ok" else 1
+
+
 def cmd_dashboard(args):
     """
     Start the local Streamlit dashboard.
@@ -2292,6 +2360,7 @@ process mining:
   fracture discover --pipeline-id X              ← discover actual variants
   fracture compare --pipeline-id X               ← compare process perspectives
   fracture predict --pipeline-id X               ← forecast score/gap risk
+  fracture recommend --pipeline-id X             ← recommend next action
 
 primary key:
   (pipeline_id, run_date) — unique per pipeline per day
@@ -2427,6 +2496,23 @@ primary key:
     p_pred.add_argument('--min-gap-points', type=int, default=5,
                         help='Minimum bilateral-gap rows required for gap prediction')
 
+    # recommend
+    p_rec = sub.add_parser(
+        'recommend',
+        help='Recommend next actions from conformance and prediction signals'
+    )
+    p_rec.add_argument('--key', default=None,
+                       help='Pipeline key FRC-xxxxxxxx')
+    p_rec.add_argument('--pipeline-id', default=None, dest='pipeline_id')
+    p_rec.add_argument('--log-path', default='conformance_log.csv',
+                       help='Conformance log used by recommendations')
+    p_rec.add_argument('--skip-prediction', action='store_true',
+                       help='Use latest conformance only, without trend prediction')
+    p_rec.add_argument('--min-score-points', type=int, default=5,
+                       help='Minimum scored rows required for score prediction signal')
+    p_rec.add_argument('--min-gap-points', type=int, default=5,
+                       help='Minimum bilateral-gap rows required for gap prediction signal')
+
     # delete
     p_del = sub.add_parser('delete', help='Delete a run entry')
     p_del.add_argument('--pipeline-id', required=True, dest='pipeline_id')
@@ -2488,6 +2574,7 @@ primary key:
         'discover':  cmd_discover,
         'compare':   cmd_compare,
         'predict':   cmd_predict,
+        'recommend': cmd_recommend,
         'delete':    cmd_delete,
         'log':       cmd_log,
         'deprecate':   cmd_deprecate,
