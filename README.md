@@ -59,6 +59,7 @@ pip install -e .
 Check the current demo pipeline:
 
 ```bash
+python scripts/08_backfill_conformance_history.py --start-date 20260519 --end-date 20260618
 python -m fracture.cli status --pipeline-id trade_positions_sftp
 ```
 
@@ -67,10 +68,11 @@ Run the full Phase 5 demo flow:
 ```bash
 python -m fracture.cli discover --pipeline-id trade_positions_sftp --date 20260618
 python -m fracture.cli compare --pipeline-id trade_positions_sftp --mode producer-consumer --date 20260618
+python -m fracture.cli compare --pipeline-id trade_positions_sftp --mode period
 python -m fracture.cli performance --pipeline-id trade_positions_sftp --date 20260618
 python -m fracture.cli predict --pipeline-id trade_positions_sftp
 python -m fracture.cli recommend --pipeline-id trade_positions_sftp
-python -m fracture.cli visualize --pipeline-id trade_positions_sftp --kind all --date 20260618
+python -m fracture.cli visualize --pipeline-id trade_positions_sftp --kind all --all-dates
 python -m fracture.cli dashboard
 ```
 
@@ -208,7 +210,7 @@ BREACH  after p99 + grace
 Generate all visuals:
 
 ```bash
-python -m fracture.cli visualize --pipeline-id trade_positions_sftp --kind all --date 20260618
+python -m fracture.cli visualize --pipeline-id trade_positions_sftp --kind all --all-dates
 ```
 
 Expected files:
@@ -224,6 +226,8 @@ outputs/visualizations/trade_positions_sftp/performance_dfg_producer.png
 outputs/visualizations/trade_positions_sftp/performance_dfg_consumer.png
 outputs/visualizations/trade_positions_sftp/execution_time_drift_producer.png
 outputs/visualizations/trade_positions_sftp/execution_time_drift_consumer.png
+outputs/visualizations/trade_positions_sftp/prediction.json
+outputs/visualizations/trade_positions_sftp/recommendations.json
 outputs/visualizations/fleet_heatmap.png
 ```
 
@@ -238,6 +242,8 @@ Short interpretation:
 | `discovered_dfg_*.png` | Shows actual directly-follows graph from event logs |
 | `performance_dfg_*.png` | Shows process arcs weighted by timing/frequency |
 | `execution_time_drift_*.png` | Shows run-duration trend against contract p95 and deadline |
+| `prediction.json` | Stores score/gap forecast results for dashboard/report use |
+| `recommendations.json` | Stores owner, severity, probable cause, recommended action, and next command |
 | `fleet_heatmap.png` | Shows weekday/fleet patterns across pipelines |
 
 More detail is in `VISUALIZATION_GUIDE.md`.
@@ -264,10 +270,10 @@ Current pages:
 ```text
 Fleet Overview     Fleet health, filters, high-gap pipelines
 Pipeline Detail    Latest score, timing zone, formula breakdown, contract summary
-Visualizations     Gap, drift, Petri net, DFG, performance, heatmap views
+Visualizations     Gap, drift, Petri net, DFG, performance, prediction/actions, heatmap views
 ```
 
-The dashboard can regenerate missing visual PNGs from the UI.
+The dashboard can regenerate missing PNG and JSON artifacts from the UI.
 
 ## Tests
 

@@ -8,7 +8,7 @@ Fracture demo.
 Generate every visualization for the main demo pipeline:
 
 ```bash
-python -m fracture.cli visualize --pipeline-id trade_positions_sftp --kind all --date 20260618
+python -m fracture.cli visualize --pipeline-id trade_positions_sftp --kind all --all-dates
 ```
 
 Generate one visual family:
@@ -20,6 +20,8 @@ python -m fracture.cli visualize --pipeline-id trade_positions_sftp --kind petri
 python -m fracture.cli visualize --pipeline-id trade_positions_sftp --kind dfg --date 20260618
 python -m fracture.cli visualize --pipeline-id trade_positions_sftp --kind performance --date 20260618
 python -m fracture.cli visualize --kind heatmap
+python -m fracture.cli predict --pipeline-id trade_positions_sftp
+python -m fracture.cli recommend --pipeline-id trade_positions_sftp
 ```
 
 Output directory:
@@ -273,6 +275,67 @@ Missing days are unknown, not failures.
 Fracture avoids turning missing data into false red alerts.
 ```
 
+### `prediction.json`
+
+Purpose:
+
+```text
+Stores deterministic prediction results for the dashboard.
+```
+
+What it answers:
+
+```text
+Is the score or bilateral gap trending toward a future risk threshold?
+```
+
+How to read:
+
+```text
+status       = whether prediction could run
+score points = number of conformance rows available for score trend
+gap points   = number of gap rows available for gap trend
+slope        = trend direction per day
+confidence   = HIGH/MEDIUM/LOW based on history and trend strength
+```
+
+Use with:
+
+```bash
+python -m fracture.cli predict --pipeline-id trade_positions_sftp
+```
+
+### `recommendations.json`
+
+Purpose:
+
+```text
+Stores action-oriented recommendations for the dashboard.
+```
+
+What it answers:
+
+```text
+Who should act, how urgent is it, what likely caused the issue, and what command
+should be run next?
+```
+
+How to read:
+
+```text
+INFO     = no action needed
+WATCH    = monitor
+ACTION   = fix this sprint
+URGENT   = severe issue or SLA risk
+BLOCKED  = logging/contract issue prevents reliable measurement
+```
+
+Use with:
+
+```bash
+python -m fracture.cli recommend --pipeline-id trade_positions_sftp
+```
+
 ## Dashboard
 
 Start the dashboard:
@@ -304,20 +367,23 @@ inputs/
 outputs/visualizations/
 ```
 
-If a visual is missing, the dashboard can regenerate it from local inputs.
+If a visual or JSON action artifact is missing, the dashboard can regenerate it
+from local inputs and `conformance_log.csv`.
 
 ## Recommended Demo Order
 
 Use this order when presenting the project:
 
 ```bash
+python scripts/08_backfill_conformance_history.py --start-date 20260519 --end-date 20260618
 python -m fracture.cli status --pipeline-id trade_positions_sftp
 python -m fracture.cli discover --pipeline-id trade_positions_sftp --date 20260618
 python -m fracture.cli compare --pipeline-id trade_positions_sftp --mode producer-consumer --date 20260618
+python -m fracture.cli compare --pipeline-id trade_positions_sftp --mode period
 python -m fracture.cli performance --pipeline-id trade_positions_sftp --date 20260618
 python -m fracture.cli predict --pipeline-id trade_positions_sftp
 python -m fracture.cli recommend --pipeline-id trade_positions_sftp
-python -m fracture.cli visualize --pipeline-id trade_positions_sftp --kind all --date 20260618
+python -m fracture.cli visualize --pipeline-id trade_positions_sftp --kind all --all-dates
 python -m fracture.cli dashboard
 ```
 
