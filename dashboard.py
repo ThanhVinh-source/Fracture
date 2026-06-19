@@ -156,6 +156,94 @@ def numeric_value(row: pd.Series, column: str):
     return float(value)
 
 
+def get_latest_pipeline_row(
+    conformance_df: pd.DataFrame,
+    pipeline_id: str,
+) -> Optional[pd.Series]:
+    """
+    Return the latest measured row for one pipeline.
+
+    Several dashboard pages need the same "current state" row. Keeping the
+    lookup in one helper prevents Fleet, Pipeline Detail, and Visualizations
+    from accidentally using different sorting rules.
+    """
+    history = get_pipeline_history(conformance_df, pipeline_id)
+
+    if history.empty:
+        return None
+
+    return history.iloc[-1]
+
+
+def build_pipeline_takeaway(latest: Optional[pd.Series]) -> tuple[str, str]:
+    """
+    Convert the latest conformance row into one demo-friendly takeaway.
+
+    The dashboard already shows many metrics. This helper gives non-technical
+    readers a single sentence that explains what they should notice first.
+    """
+    if latest is None:
+        return "info", "No conformance result is available for this pipeline yet."
+
+    final_score = numeric_value(latest, "final_score")
+    gap = numeric_value(latest, "bilateral_gap_minutes")
+    timing_zone = str(latest.get("timing_zone", "") or "")
+    confidence = str(latest.get("confidence_level", "") or "")
+
+    if confidence in {"LOW", "UNRELIABLE"}:
+        return (
+            "warning",
+            "Measurement confidence is low. Fix or validate event extraction before acting on the score.",
+        )
+
+    if gap is not None and gap > 20:
+        return (
+            "error",
+            f"The main issue is handoff delay: the consumer waits {gap:.1f} minutes after producer availability.",
+        )
+
+    if timing_zone in {"RED", "BREACH"}:
+        return (
+            "error",
+            f"The latest run is in timing zone {timing_zone}. Investigate runtime before the next SLA window.",
+        )
+
+    if timing_zone == "AMBER":
+        return (
+            "warning",
+            "The pipeline is close to its timing boundary. Monitor runtime and handoff before it worsens.",
+        )
+
+    if final_score is not None and final_score >= 0.85:
+        return (
+            "success",
+            "The latest measured run is broadly conformant. Continue monitoring for drift and hidden handoff gaps.",
+        )
+
+    return (
+        "info",
+        "The latest result needs review. Use the score breakdown and visual tabs to identify the driver.",
+    )
+
+
+def render_takeaway(kind: str, message: str):
+    """
+    Render one short interpretation card.
+
+    Streamlit status components make the dashboard easier to scan during a
+    live demo: red means act now, yellow means monitor, blue means context,
+    and green means no immediate issue.
+    """
+    if kind == "error":
+        st.error(message)
+    elif kind == "warning":
+        st.warning(message)
+    elif kind == "success":
+        st.success(message)
+    else:
+        st.info(message)
+
+
 def render_gap_callout(latest: pd.Series):
     """
     Highlight bilateral handoff risk when the producer-consumer gap is large.
@@ -178,6 +266,54 @@ def render_gap_callout(latest: pd.Series):
         )
     else:
         st.success(f"Bilateral gap is low: {gap:.1f} minutes.")
+
+
+def render_pipeline_snapshot(
+    selected_pipeline: str,
+    conformance_df: pd.DataFrame,
+    available_input_dates: Optional[list[str]] = None,
+):
+    """
+    Show the selected pipeline's current story before detailed visuals.
+
+    This section is intentionally compact: it tells a reviewer what the latest
+    score, zone, confidence, and handoff gap are before they inspect charts.
+    """
+    latest = get_latest_pipeline_row(conformance_df, selected_pipeline)
+    available_input_dates = available_input_dates or []
+    history = get_pipeline_history(conformance_df, selected_pipeline)
+
+    st.subheader(selected_pipeline)
+
+    kind, message = build_pipeline_takeaway(latest)
+    render_takeaway(kind, message)
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("History rows", len(history))
+    col2.metric("Input dates", len(available_input_dates))
+
+    if latest is None:
+        col3.metric("Latest score", "n/a")
+        col4.metric("Timing zone", "n/a")
+        col5.metric("Gap", "n/a")
+        return
+
+    col3.metric("Latest score", format_score(latest.get("final_score")))
+    col4.metric("Timing zone", latest.get("timing_zone", "n/a"))
+
+    gap = numeric_value(latest, "bilateral_gap_minutes")
+    col5.metric("Gap", "n/a" if gap is None else f"{gap:.1f} min")
+
+    if len(history) <= 1:
+        st.info(
+            "Only one conformance row is available. Drift and prediction views "
+            "can show the latest state, but they cannot prove a trend yet."
+        )
+    elif len(history) < 5:
+        st.warning(
+            f"{len(history)} conformance rows are available. Multi-day charts are visible, "
+            "but prediction confidence is limited until at least 5 points exist."
+        )
 
 
 def render_variant_explainer(latest: pd.Series):
@@ -316,47 +452,6 @@ def load_pipeline_event_scope(
     return producer_all, consumer_all, f"ok: {scope_label}"
 
 
-def render_visual_history_summary(
-    selected_pipeline: str,
-    conformance_df: pd.DataFrame,
-    available_input_dates: list[str],
-):
-    """
-    Explain whether the selected pipeline has enough data for multi-day charts.
-
-    This avoids a common confusion: a one-point Drift Chart is valid, but it
-    means only one conformance row exists for that pipeline.
-    """
-    history = get_pipeline_history(conformance_df, selected_pipeline)
-    history_points = len(history)
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Conformance history points", history_points)
-    col2.metric(
-        "Available input dates",
-        len(available_input_dates),
-    )
-
-    if not history.empty and "run_date" in history.columns:
-        latest_run_date = history["run_date"].iloc[-1]
-        col3.metric("Latest conformance date", str(latest_run_date)[:10])
-    else:
-        col3.metric("Latest conformance date", "n/a")
-
-    if history_points <= 1:
-        st.info(
-            "This pipeline currently has only one conformance row, so trend charts "
-            "can only show one point. Run conformance for more dates, or select a "
-            "pipeline such as trade_positions_sftp that already has multi-day history."
-        )
-    elif history_points < 5:
-        st.warning(
-            f"This pipeline has {history_points} conformance rows. The chart can show "
-            "multiple days, but trend and prediction signals are still weak until at "
-            "least 5 historical points are available."
-        )
-
-
 def render_contract_summary_cards(
     selected_pipeline: str,
     contracts_df: pd.DataFrame,
@@ -397,7 +492,7 @@ def render_contract_summary_cards(
     with st.expander("Raw contract metadata", expanded=False):
         st.dataframe(
             contract_row,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -537,7 +632,7 @@ def render_fleet_overview(conformance_df: pd.DataFrame):
     else:
         st.dataframe(
             filtered_latest[visible_columns].sort_values("pipeline_id"),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -572,15 +667,16 @@ def render_pipeline_detail(conformance_df: pd.DataFrame, contracts_df: pd.DataFr
         pipelines,
     )
 
-    history = df[df["pipeline_id"] == selected_pipeline].copy()
+    history = get_pipeline_history(df, selected_pipeline)
+    latest = get_latest_pipeline_row(df, selected_pipeline)
 
-    if history.empty:
+    if history.empty or latest is None:
         st.warning("No history for this pipeline.")
         return
 
-    latest = history.sort_values("run_date").iloc[-1]
-
     st.subheader(selected_pipeline)
+    kind, message = build_pipeline_takeaway(latest)
+    render_takeaway(kind, message)
     explain_timing_score_mismatch(latest)
 
     col1, col2, col3, col4 = st.columns(4)
@@ -632,11 +728,21 @@ def render_visualization_image(path: Path, title: str, missing_hint: str):
 
     if path.exists():
         # Streamlit can render local PNG files directly from the project folder.
-        st.image(str(path), use_container_width=True)
+        st.image(str(path), width="stretch")
         st.caption(str(path))
         return
 
     st.info(missing_hint)
+
+
+def render_chart_note(title: str, body: str):
+    """
+    Add a short explanation below a visual.
+
+    Static PNGs are useful in reports, but dashboard viewers still need a plain
+    sentence that says what the chart proves and how to read it.
+    """
+    st.caption(f"{title}: {body}")
 
 
 def load_json_artifact(path: Path) -> tuple[dict, str]:
@@ -1336,7 +1442,7 @@ def render_visualizations(conformance_df: pd.DataFrame):
             for status in generation_statuses:
                 st.write(status)
 
-    render_visual_history_summary(
+    render_pipeline_snapshot(
         selected_pipeline=selected_pipeline,
         conformance_df=conformance_df,
         available_input_dates=available_dates,
@@ -1358,10 +1464,18 @@ def render_visualizations(conformance_df: pd.DataFrame):
             "Bilateral Gap Timeline",
             "No bilateral gap timeline exported yet.",
         )
+        render_chart_note(
+            "What this proves",
+            "orange handoff lines show how long the consumer waits after the producer publishes DATA_AVAILABLE.",
+        )
         render_visualization_image(
             pipeline_dir / "bilateral_gap_analysis.png",
             "Bilateral Gap Analysis",
             "No bilateral gap analysis exported yet.",
+        )
+        render_chart_note(
+            "How to read it",
+            "left bars show gap by run; the right trend panel shows whether the handoff delay is widening.",
         )
 
     with drift_tab:
@@ -1374,12 +1488,20 @@ def render_visualizations(conformance_df: pd.DataFrame):
             "Drift Chart",
             "No drift chart exported yet.",
         )
+        render_chart_note(
+            "What this proves",
+            "the score history shows whether conformance is stable, improving, or drifting toward risk.",
+        )
 
     with petri_tab:
         render_visualization_image(
             pipeline_dir / "contract_petri_net.png",
             "Contract Petri Net",
             "No contract Petri net exported yet.",
+        )
+        render_chart_note(
+            "What this proves",
+            "the YAML contract has been converted into a formal process model for token replay.",
         )
 
     with dfg_tab:
@@ -1388,10 +1510,18 @@ def render_visualizations(conformance_df: pd.DataFrame):
             "Discovered Producer DFG",
             "No producer DFG exported yet.",
         )
+        render_chart_note(
+            "Producer DFG",
+            "the graph is discovered from actual producer events, not manually drawn from the contract.",
+        )
         render_visualization_image(
             pipeline_dir / "discovered_dfg_consumer.png",
             "Discovered Consumer DFG",
             "No consumer DFG exported yet.",
+        )
+        render_chart_note(
+            "Consumer DFG",
+            "differences from the producer graph reveal downstream ordering or logging behavior.",
         )
 
     with performance_tab:
@@ -1404,20 +1534,36 @@ def render_visualizations(conformance_df: pd.DataFrame):
             "Producer Performance DFG",
             "No producer Performance DFG exported yet.",
         )
+        render_chart_note(
+            "Producer performance",
+            "arc labels show where producer-side execution time accumulates between activities.",
+        )
         render_visualization_image(
             pipeline_dir / "performance_dfg_consumer.png",
             "Consumer Performance DFG",
             "No consumer Performance DFG exported yet.",
+        )
+        render_chart_note(
+            "Consumer performance",
+            "consumer-side arcs include downstream waiting and pickup delay after producer availability.",
         )
         render_visualization_image(
             pipeline_dir / "execution_time_drift_producer.png",
             "Producer Execution Time Drift",
             "No producer execution time drift exported yet.",
         )
+        render_chart_note(
+            "Producer drift",
+            "the trend line shows whether producer execution duration is moving toward SLA pressure.",
+        )
         render_visualization_image(
             pipeline_dir / "execution_time_drift_consumer.png",
             "Consumer Execution Time Drift",
             "No consumer execution time drift exported yet.",
+        )
+        render_chart_note(
+            "Consumer drift",
+            "the trend line shows whether downstream pickup and processing are becoming slower.",
         )
 
     with actions_tab:
@@ -1452,6 +1598,10 @@ def render_visualizations(conformance_df: pd.DataFrame):
             VISUALIZATION_ROOT / "fleet_heatmap.png",
             "Fleet Weekday Heatmap",
             "No fleet heatmap exported yet.",
+        )
+        render_chart_note(
+            "What this proves",
+            "weekday bands reveal intermittent or calendar-specific fleet behavior across pipelines.",
         )
 
 

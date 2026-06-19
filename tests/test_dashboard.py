@@ -75,6 +75,49 @@ def test_numeric_value_handles_missing_and_bad_values():
     assert dashboard.numeric_value(row, "missing_column") is None
 
 
+def test_get_latest_pipeline_row_uses_latest_run_date():
+    df = pd.DataFrame({
+        "pipeline_id": ["payment_batch", "payment_batch", "other_pipeline"],
+        "run_date": ["20260617", "20260618", "20260618"],
+        "final_score": [0.80, 0.95, 0.50],
+    })
+
+    latest = dashboard.get_latest_pipeline_row(df, "payment_batch")
+
+    # The dashboard should summarize the newest measured row for the selected pipeline.
+    assert latest["run_date"] == "20260618"
+    assert latest["final_score"] == 0.95
+
+
+def test_build_pipeline_takeaway_flags_high_gap_first():
+    row = pd.Series({
+        "final_score": "0.93",
+        "timing_zone": "AMBER",
+        "confidence_level": "HIGH",
+        "bilateral_gap_minutes": "33.6",
+    })
+
+    kind, message = dashboard.build_pipeline_takeaway(row)
+
+    # A severe producer-consumer gap is the most important demo finding.
+    assert kind == "error"
+    assert "handoff delay" in message
+
+
+def test_build_pipeline_takeaway_marks_healthy_pipeline_success():
+    row = pd.Series({
+        "final_score": "0.96",
+        "timing_zone": "GREEN",
+        "confidence_level": "HIGH",
+        "bilateral_gap_minutes": "4.0",
+    })
+
+    kind, message = dashboard.build_pipeline_takeaway(row)
+
+    assert kind == "success"
+    assert "broadly conformant" in message
+
+
 def test_sorted_filter_options_drops_empty_values():
     df = pd.DataFrame({
         "timing_zone": ["GREEN", "AMBER", "GREEN", "", None],
@@ -258,6 +301,12 @@ if __name__ == "__main__":
           test_format_score_handles_numbers_and_empty_values)
     check("numeric_value handles missing and bad values",
           test_numeric_value_handles_missing_and_bad_values)
+    check("get_latest_pipeline_row uses latest run date",
+          test_get_latest_pipeline_row_uses_latest_run_date)
+    check("build_pipeline_takeaway flags high gap first",
+          test_build_pipeline_takeaway_flags_high_gap_first)
+    check("build_pipeline_takeaway marks healthy pipeline success",
+          test_build_pipeline_takeaway_marks_healthy_pipeline_success)
     check("sorted_filter_options drops empty values",
           test_sorted_filter_options_drops_empty_values)
     check("get_pipeline_options prefers conformance history",
