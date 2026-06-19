@@ -87,13 +87,13 @@ def check(name, fn):
     try:
         fn()
         passed += 1
-        print(f'  ✓  {name}')
+        print(f'  v  {name}')
     except AssertionError as e:
         failed += 1
-        print(f'  ✗  {name}: {e}')
+        print(f'  x  {name}: {e}')
     except Exception as e:
         failed += 1
-        print(f'  ✗  {name}: {type(e).__name__}: {e}')
+        print(f'  x  {name}: {type(e).__name__}: {e}')
 
 
 # ── Petri net tests ───────────────────────────────────────────────────────────

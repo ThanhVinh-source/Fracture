@@ -95,7 +95,7 @@ def step1_structure():
     all_ok = True
     for path, desc in required_files:
         exists = (root / path).exists()
-        icon   = '  ✓' if exists else '  ✗'
+        icon   = '  v' if exists else '  x'
         if not exists:
             all_ok = False
         print(f"{icon}  {path:<35} {desc}")
@@ -108,11 +108,11 @@ def step1_structure():
             Path(d).mkdir(exist_ok=True)
             print(f"  ○  {d}/ created")
         else:
-            print(f"  ✓  {d}/")
+            print(f"  v  {d}/")
 
     if not all_ok:
         print()
-        print("  ✗ Some files are missing.")
+        print("  x Some files are missing.")
         print("  Copy all .py files from your outputs directory to fracture/")
         sys.exit(1)
 
@@ -185,7 +185,7 @@ def step2_scenarios():
 """)
 
     ok = r.final_score >= 0.90 and r.timing_zone == 'GREEN'
-    print(f"  {'✓ PASS' if ok else '✗ FAIL'}")
+    print(f"  {'v PASS' if ok else 'x FAIL'}")
     all_pass = all_pass and ok
 
     # ── Scenario 2: Bilateral gap ─────────────────────────────────────────
@@ -230,7 +230,7 @@ def step2_scenarios():
 """)
 
     ok2 = r2.bilateral_gap_minutes and r2.bilateral_gap_minutes > 15
-    print(f"  {'✓ PASS' if ok2 else '✗ FAIL'}")
+    print(f"  {'v PASS' if ok2 else 'x FAIL'}")
     all_pass = all_pass and ok2
 
     # ── Scenario 3: Silent ────────────────────────────────────────────────
@@ -275,7 +275,7 @@ def step2_scenarios():
 """)
 
     ok3 = d3.completeness_score < 0.75
-    print(f"  {'✓ PASS' if ok3 else '✗ FAIL'}")
+    print(f"  {'v PASS' if ok3 else 'x FAIL'}")
     all_pass = all_pass and ok3
 
     # ── Scenario 4: Dual preflight ────────────────────────────────────────
@@ -317,7 +317,7 @@ def step2_scenarios():
 """)
 
     ok4 = r4.final_score >= 0.85 and r4.bilateral_gap_minutes is None
-    print(f"  {'✓ PASS' if ok4 else '✗ FAIL'}")
+    print(f"  {'v PASS' if ok4 else 'x FAIL'}")
     all_pass = all_pass and ok4
 
     # ── Scenario 5: Sudden collapse ───────────────────────────────────────
@@ -362,7 +362,7 @@ def step2_scenarios():
 """)
 
     ok5 = r5_hist.final_score >= 0.85 and r5_live.final_score < 0.70
-    print(f"  {'✓ PASS' if ok5 else '✗ FAIL'}")
+    print(f"  {'v PASS' if ok5 else 'x FAIL'}")
     all_pass = all_pass and ok5
 
     # ── Summary ───────────────────────────────────────────────────────────
@@ -427,12 +427,12 @@ def step3_visualisations():
 
     try:
         pm4py.save_vis_petri_net(net, im, fm, 'outputs/01_petri_net_normative.png')
-        print("  ✓  outputs/01_petri_net_normative.png")
+        print("  v  outputs/01_petri_net_normative.png")
         print("     Open this. You will see 6 circles (places) connected by")
         print("     4 rectangles (transitions: SCHEDULED STARTED COMPLETED DATA_AVAILABLE)")
         print("     This is your contract made visible as a Petri net.")
     except Exception as e:
-        print(f"  ✗  Petri net: {e}")
+        print(f"  x  Petri net: {e}")
 
     # ── 3b: Discovered net from healthy logs ─────────────────────────────
     print()
@@ -444,12 +444,12 @@ def step3_visualisations():
         net_disc, im_disc, fm_disc = pm4py.discover_petri_net_inductive(log_healthy)
         pm4py.save_vis_petri_net(net_disc, im_disc, fm_disc,
                                   'outputs/02_petri_net_discovered_healthy.png')
-        print("  ✓  outputs/02_petri_net_discovered_healthy.png")
+        print("  v  outputs/02_petri_net_discovered_healthy.png")
         print("     Compare with 01. They should look identical.")
         print("     Healthy pipeline: discovered model matches the contract.")
         print("     This validates your contract is correct.")
     except Exception as e:
-        print(f"  ✗  Discovered net: {e}")
+        print(f"  x  Discovered net: {e}")
 
     # ── 3c: Performance DFG — bilateral gap visible as red arc ───────────
     print()
@@ -466,13 +466,13 @@ def step3_visualisations():
         perf_prod, s_prod, e_prod = pm4py.discover_performance_dfg(log_prod)
         pm4py.save_vis_performance_dfg(perf_prod, s_prod, e_prod,
                                         'outputs/03_perf_dfg_producer.png')
-        print("  ✓  outputs/03_perf_dfg_producer.png  (producer side)")
+        print("  v  outputs/03_perf_dfg_producer.png  (producer side)")
 
         # Consumer performance DFG
         perf_cons, s_cons, e_cons = pm4py.discover_performance_dfg(log_cons)
         pm4py.save_vis_performance_dfg(perf_cons, s_cons, e_cons,
                                         'outputs/04_perf_dfg_consumer.png')
-        print("  ✓  outputs/04_perf_dfg_consumer.png  (consumer side)")
+        print("  v  outputs/04_perf_dfg_consumer.png  (consumer side)")
         print()
         print("  Compare 03 and 04 side by side.")
         print("  The arc from COMPLETED → DATA_AVAILABLE will be different.")
@@ -481,7 +481,7 @@ def step3_visualisations():
         print("  THAT difference is the bilateral gap Fracture measures.")
         print("  This is the Figure 2 for your paper.")
     except Exception as e:
-        print(f"  ✗  Performance DFG: {e}")
+        print(f"  x  Performance DFG: {e}")
 
     # ── 3d: Dotted chart — silent pipeline ────────────────────────────────
     print()
@@ -498,12 +498,12 @@ def step3_visualisations():
         df_for_dot = pm4py.convert_to_dataframe(log_silent)
         pm4py.save_vis_dotted_chart(df_for_dot, 'outputs/05_dotted_silent.png',
                                     attributes=['concept:name'])
-        print("  ✓  outputs/05_dotted_silent.png")
+        print("  v  outputs/05_dotted_silent.png")
         print("     Each row is one pipeline run (30 rows for 30 days).")
         print("     Monday and Thursday rows are very short — only SCHEDULED fires.")
         print("     This is the silent breach visualised.")
     except Exception as e:
-        print(f"  ✗  Dotted chart: {e}")
+        print(f"  x  Dotted chart: {e}")
 
     print()
     print("  All visualisations saved to outputs/")
@@ -535,11 +535,11 @@ if __name__ == '__main__':
     print("═" * 60)
     print()
     print("  What you just verified:")
-    print("  ✓ Healthy pipeline scores above 0.90 using token replay")
-    print("  ✓ Bilateral gap of 27 min detected in real minutes")
-    print("  ✓ Silent pipeline caught by completeness (no alerts elsewhere)")
-    print("  ✓ Broken consumer does not invalidate producer score")
-    print("  ✓ Sudden collapse: live score critical despite healthy history")
+    print("  v Healthy pipeline scores above 0.90 using token replay")
+    print("  v Bilateral gap of 27 min detected in real minutes")
+    print("  v Silent pipeline caught by completeness (no alerts elsewhere)")
+    print("  v Broken consumer does not invalidate producer score")
+    print("  v Sudden collapse: live score critical despite healthy history")
     print()
     print("  What to read next:")
     print("  conformance.py steps 3, 4, 5 — token replay, timing zones, completeness")

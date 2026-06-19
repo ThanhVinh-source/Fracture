@@ -90,16 +90,16 @@ def onboard_team(
             )
             rc = cmd_register(reg_args)
             if rc != 0:
-                print(f"  [1/3] register  : ✗ failed")
+                print(f"  [1/3] register  : x failed")
                 continue
-            print(f"  [1/3] register  : ✓ key={key}")
+            print(f"  [1/3] register  : v key={key}")
 
         keys[pipeline_id] = key
 
         # Step 2: Bootstrap
         pipeline_dir = Path(inputs_dir) / pipeline_id
         if not pipeline_dir.exists() or not list(pipeline_dir.glob('producer_*.parquet')):
-            print(f"  [2/3] bootstrap : ✗ no event files in {pipeline_dir}")
+            print(f"  [2/3] bootstrap : x no event files in {pipeline_dir}")
             print(f"        → run scripts/01_setup.py first")
             continue
 
@@ -110,16 +110,16 @@ def onboard_team(
                 contracts_dir = contracts_dir,
             )
             print(
-                f"  [2/3] bootstrap : ✓ "
+                f"  [2/3] bootstrap : v "
                 f"p50={br.p50_minutes}m  "
                 f"p95={br.p95_minutes}m  "
                 f"p99={br.p99_minutes}m  "
                 f"({br.n_runs} runs, {br.coverage_pct:.0%} complete)"
             )
             if br.warning:
-                print(f"         ⚠ {br.warning[:75]}")
+                print(f"         ! {br.warning[:75]}")
         except Exception as e:
-            print(f"  [2/3] bootstrap : ✗ {e}")
+            print(f"  [2/3] bootstrap : x {e}")
             continue
 
         # Step 3: Run conformance
@@ -136,9 +136,9 @@ def onboard_team(
         )
         try:
             rc = cmd_run(run_args)
-            print(f"  [3/3] run       : {'✓ logged' if rc == 0 else '⚠ see above'}")
+            print(f"  [3/3] run       : {'v logged' if rc == 0 else '! see above'}")
         except Exception as e:
-            print(f"  [3/3] run       : ✗ {e}")
+            print(f"  [3/3] run       : x {e}")
 
     return keys
 

@@ -404,7 +404,7 @@ if __name__ == '__main__':
     total_trades     = trade_events['pipeline_run_id'].nunique()
     total_trade_recs = len(trade_events)
 
-    print(f"  ✓ Generated in {gen_time:.1f}s")
+    print(f"  v Generated in {gen_time:.1f}s")
     print()
     print(f"  {'Dataset summary':}")
     print(f"    Batches          : {N_BATCHES}")

@@ -405,7 +405,7 @@ def cmd_register(args):
             ),
         )
     except Exception as e:
-        print(f"\n  ✗ Validation failed: {e}")
+        print(f"\n  x Validation failed: {e}")
         return 1
 
     # Write contract YAML
@@ -426,7 +426,7 @@ def cmd_register(args):
     # Check for duplicate
     existing = [r for r in registry_rows if r['pipeline_id'] == pipeline_id]
     if existing:
-        print(f"\n  ⚠  Pipeline '{pipeline_id}' already registered.")
+        print(f"\n  !  Pipeline '{pipeline_id}' already registered.")
         print(f"     Existing key: {existing[0]['pipeline_key']}")
         return 1
 
@@ -485,7 +485,7 @@ def cmd_bootstrap(args):
     contract_path = contracts_dir / f"{pipeline_id}.yaml"
 
     if not contract_path.exists():
-        print(f"  ✗ Contract not found: {contract_path}")
+        print(f"  x Contract not found: {contract_path}")
         print(f"    Run: fracture register first")
         return 1
 
@@ -494,7 +494,7 @@ def cmd_bootstrap(args):
     try:
         contract = load_contract(str(contract_path))
     except Exception as e:
-        print(f"  ✗ Contract error: {e}")
+        print(f"  x Contract error: {e}")
         return 1
 
     print(f"\n  Bootstrapping '{pipeline_id}'...")
@@ -502,7 +502,7 @@ def cmd_bootstrap(args):
     # Find all parquet files for this pipeline
     pipeline_dir = inputs_dir / pipeline_id
     if not pipeline_dir.exists():
-        print(f"  ✗ No input files found in {pipeline_dir}")
+        print(f"  x No input files found in {pipeline_dir}")
         print(f"    Drop your event files there first.")
         return 1
 
@@ -512,7 +512,7 @@ def cmd_bootstrap(args):
     all_files     = parquet_files + csv_files
 
     if not all_files:
-        print(f"  ✗ No producer_*.parquet files in {pipeline_dir}")
+        print(f"  x No producer_*.parquet files in {pipeline_dir}")
         return 1
 
     # Load all event files
@@ -527,7 +527,7 @@ def cmd_bootstrap(args):
             pass
 
     if not dfs:
-        print(f"  ✗ Could not read any event files.")
+        print(f"  x Could not read any event files.")
         return 1
 
     events = pd.concat(dfs, ignore_index=True)
@@ -539,7 +539,7 @@ def cmd_bootstrap(args):
     durations = _compute_durations(events, contract)
 
     if len(durations) < 5:
-        print(f"  ✗ Only {len(durations)} complete runs found.")
+        print(f"  x Only {len(durations)} complete runs found.")
         print(f"    Need at least 5 complete runs for reliable percentiles.")
         return 1
 
@@ -576,7 +576,7 @@ def cmd_bootstrap(args):
     if no_activate:
         # Leave as DRAFT — human reviews before activating
         print()
-        print(f"  ✓ Bootstrap complete: {contract_path}")
+        print(f"  v Bootstrap complete: {contract_path}")
         print(f"  Status: DRAFT (--no-activate set)")
         print()
         print(f"  Review the computed values in {contract_path}")
@@ -602,7 +602,7 @@ def cmd_bootstrap(args):
         _write_csv(_registry_path(), registry_rows, REGISTRY_COLUMNS)
 
         print()
-        print(f"  ✓ Contract activated: {contract_path}")
+        print(f"  v Contract activated: {contract_path}")
         print(f"  Status: DRAFT → ACTIVE")
         print()
         print(f"  Ready. Run daily conformance:")
@@ -651,7 +651,7 @@ def cmd_activate(args):
     contract_path = contracts_dir / f"{pipeline_id}.yaml"
 
     if not contract_path.exists():
-        print(f"\n  ✗ Contract not found: {contract_path}")
+        print(f"\n  x Contract not found: {contract_path}")
         return 1
 
     import yaml as _yaml
@@ -665,7 +665,7 @@ def cmd_activate(args):
         return 0
 
     if current_status == 'deprecated':
-        print(f"\n  ✗ {pipeline_id} is DEPRECATED — cannot activate")
+        print(f"\n  x {pipeline_id} is DEPRECATED — cannot activate")
         return 1
 
     # Show the values for final human review
@@ -695,7 +695,7 @@ def cmd_activate(args):
     _write_csv(_registry_path(), registry_rows, REGISTRY_COLUMNS)
 
     key = _get_key_for_pipeline(pipeline_id)
-    print(f"  ✓ {pipeline_id} is now ACTIVE")
+    print(f"  v {pipeline_id} is now ACTIVE")
     print()
     print(f"  Run conformance:")
     print(f"    fracture run --key {key}")
@@ -778,7 +778,7 @@ def cmd_deprecate(args):
     contract_path = contracts_dir / f"{pipeline_id}.yaml"
 
     if not contract_path.exists():
-        print(f"\n  ✗ Contract not found: {contract_path}")
+        print(f"\n  x Contract not found: {contract_path}")
         return 1
 
     raw    = _yaml.safe_load(contract_path.read_text())
@@ -814,7 +814,7 @@ def cmd_deprecate(args):
 
     key = _get_key_for_pipeline(pipeline_id)
 
-    print(f"  ✓ {pipeline_id} → DEPRECATED")
+    print(f"  v {pipeline_id} → DEPRECATED")
     print(f"  Contract: {contract_path}")
     print(f"  Historical log preserved in conformance_log.csv")
     print()
@@ -888,15 +888,15 @@ def cmd_deregister(args):
     # Show what will be deleted
     print(f"  Files to be removed:")
     if contract_path.exists():
-        print(f"    ✗  {contract_path}  (stale contract)")
+        print(f"    x  {contract_path}  (stale contract)")
     if pnml_path.exists():
-        print(f"    ✗  {pnml_path}  (stale Petri net — MUST be deleted)")
+        print(f"    x  {pnml_path}  (stale Petri net — MUST be deleted)")
     else:
         print(f"    ○  {pnml_path}  (no PNML cache found)")
     print()
     print(f"  Preserved:")
-    print(f"    ✓  conformance_log.csv  (historical measurements)")
-    print(f"    ✓  inputs/{pipeline_id}/  (event files)")
+    print(f"    v  conformance_log.csv  (historical measurements)")
+    print(f"    v  inputs/{pipeline_id}/  (event files)")
     print()
 
     # Log the deregistration event to conformance_log.csv
@@ -923,12 +923,12 @@ def cmd_deregister(args):
     # Delete PNML (stale Petri net)
     if pnml_path.exists():
         pnml_path.unlink()
-        print(f"  ✓ Deleted PNML cache: {pnml_path}")
+        print(f"  v Deleted PNML cache: {pnml_path}")
     
     # Delete contract YAML
     if contract_path.exists():
         contract_path.unlink()
-        print(f"  ✓ Deleted contract: {contract_path}")
+        print(f"  v Deleted contract: {contract_path}")
 
     # Remove from registry
     registry_rows = _read_csv(_registry_path())
@@ -938,7 +938,7 @@ def cmd_deregister(args):
     after = len(registry_rows)
     if before > after:
         _write_csv(_registry_path(), registry_rows, REGISTRY_COLUMNS)
-        print(f"  ✓ Removed from registry")
+        print(f"  v Removed from registry")
 
     print()
     print(f"  {pipeline_id} deregistered.")
@@ -1181,7 +1181,7 @@ def cmd_run_all(args):
 
         if result.status == 'SUCCESS' and result.conformance_result:
             r    = result.conformance_result
-            icon = '✓' if r.timing_zone == 'GREEN' else '⚠' if 'AMBER' in r.timing_zone else '✗'
+            icon = 'v' if r.timing_zone == 'GREEN' else '!' if 'AMBER' in r.timing_zone else 'x'
             gap  = f" ← {r.bilateral_gap_minutes:.0f}min gap" if r.bilateral_gap_minutes and r.bilateral_gap_minutes > 5 else ""
             print(
                 f"  {icon} {pid:<36} {r.final_score:.0%}    "
@@ -1207,16 +1207,16 @@ def cmd_validate(args):
     if result['valid']:
         c = load_contract(args.contract)
         s = net_summary(c)
-        print(f"\n  ✓  {args.contract}")
+        print(f"\n  v  {args.contract}")
         print(f"     pipeline_id : {result['pipeline_id']}")
         print(f"     status      : {result['status']}")
         print(f"     timing      : {result['timing']}")
         print(f"     petri net   : {s['n_places']}p {s['n_transitions']}t  ({s['soundness_basis'][:40]})")
         if result.get('warnings'):
             for w in result['warnings']:
-                print(f"     ⚠  {w}")
+                print(f"     !  {w}")
     else:
-        print(f"\n  ✗  {args.contract}")
+        print(f"\n  x  {args.contract}")
         for e in result.get('errors', []):
             print(f"     {e}")
         return 1
@@ -1276,7 +1276,7 @@ def cmd_delete(args):
         print(f"\n  No entry: pipeline_id={args.pipeline_id} date={args.date}")
         return 1
     _write_csv(_log_path(), rows, LOG_COLUMNS)
-    print(f"\n  ✓ Deleted: {args.pipeline_id} / {args.date}")
+    print(f"\n  v Deleted: {args.pipeline_id} / {args.date}")
     print(f"  Log: {before} → {after} rows")
     return 0
 
@@ -1354,7 +1354,7 @@ def cmd_demo(args):
                        contract        = contract,
                        consumer_events = cons if len(cons) > 0 else None,
                    )
-            icon = '✓' if r.timing_zone == 'GREEN' else '⚠' if 'AMBER' in r.timing_zone else '✗'
+            icon = 'v' if r.timing_zone == 'GREEN' else '!' if 'AMBER' in r.timing_zone else 'x'
             key  = _generate_key(contract.pipeline_id)
             print(
                 f"  {icon} {contract.pipeline_id:<38} "
@@ -1372,7 +1372,7 @@ def cmd_demo(args):
             _append_log(_result_to_row(contract.pipeline_id, key, mock, today))
 
         except Exception as e:
-            print(f"  ✗ {contract.pipeline_id:<38} ERROR: {str(e)[:50]}")
+            print(f"  x {contract.pipeline_id:<38} ERROR: {str(e)[:50]}")
 
     print()
     print(f"  Logged → conformance_log.csv")
@@ -1440,11 +1440,11 @@ def cmd_explain(args):
         if not score or score in ('BLOCKED','DRAFT','NO_INPUT','ERROR'):
             icon = '○'
         elif zone == 'GREEN':
-            icon = '✓'
+            icon = 'v'
         elif zone in ('AMBER', 'RED'):
-            icon = '⚠'
+            icon = '!'
         else:
-            icon = '✗'
+            icon = 'x'
 
         print(f"  {icon}  {pid}")
         print(f"     Date      : {dt}")
@@ -1657,12 +1657,12 @@ def _resolve_pipeline(args) -> str:
     if hasattr(args, 'key') and args.key:
         pid = _lookup_key(args.key)
         if not pid:
-            print(f"\n  ✗ Key not found: {args.key}")
+            print(f"\n  x Key not found: {args.key}")
             print(f"    Run 'fracture list' to see registered pipelines.")
         return pid
     if hasattr(args, 'pipeline_id') and args.pipeline_id:
         return args.pipeline_id
-    print("\n  ✗ Provide --key FRC-xxxxxxxx or --pipeline-id NAME")
+    print("\n  x Provide --key FRC-xxxxxxxx or --pipeline-id NAME")
     return None
 
 

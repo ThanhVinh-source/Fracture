@@ -252,9 +252,9 @@ fracture explain --pipeline-id var_batch_processing --verbose
 ```
 PIPELINE                           SCORE  ZONE    CONF   SUMMARY
 ──────────────────────────────────────────────────────────────────
-✓ payment_settlements               102%  GREEN   HIGH   Conformant
-⚠ var_batch_processing               94%  AMBER   HIGH   Drifting at -0.8%/wk
-✗ customer_risk_features             91%  GREEN   HIGH   Fails Mon+Thu — infra
+v payment_settlements               102%  GREEN   HIGH   Conformant
+! var_batch_processing               94%  AMBER   HIGH   Drifting at -0.8%/wk
+x customer_risk_features             91%  GREEN   HIGH   Fails Mon+Thu — infra
 ```
 
 ---

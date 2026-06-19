@@ -219,7 +219,7 @@ def load_pipelines(source: str) -> dict:
                 result[pid] = entry
         return result
     except ImportError:
-        print('  ⚠  team_config not found — using standalone pipeline list')
+        print('  !  team_config not found — using standalone pipeline list')
         return STANDALONE_PIPELINES
 
 
@@ -279,7 +279,7 @@ def main(days: int = 14, output: str = 'conformance_log.csv',
     print()
     print(f'  Written {len(all_rows)} rows → {output}')
     if total_fail:
-        print(f'  ⚠  {total_fail} rows skipped (see generator errors above)')
+        print(f'  !  {total_fail} rows skipped (see generator errors above)')
     print()
 
     # Feature space preview

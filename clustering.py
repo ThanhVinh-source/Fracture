@@ -233,7 +233,7 @@ def main(csv_path: str = 'conformance_log.csv',
     # ── Load data ─────────────────────────────────────────────────────────
     path = Path(csv_path)
     if not path.exists():
-        print(f"✗  {csv_path} not found.")
+        print(f"x  {csv_path} not found.")
         print(f"   Run: python scripts/05_generate_clustering_data.py --days 7")
         sys.exit(1)
 
@@ -317,7 +317,7 @@ def main(csv_path: str = 'conformance_log.csv',
         print()
         for _, row in subset.iterrows():
             gt  = f"(GT:{row['expected_cluster']})" if has_gt else ''
-            match = '✓' if not has_gt or row['expected_cluster'] == row['cluster_name'] else '✗'
+            match = 'v' if not has_gt or row['expected_cluster'] == row['cluster_name'] else 'x'
             print(f"     {match} {row['pipeline_id']:<30} {gt}")
         print()
 
@@ -336,7 +336,7 @@ def main(csv_path: str = 'conformance_log.csv',
         print(f"  DBSCAN anomalies ({n_anomalies} pipelines):")
         anomalies = feat_df[feat_df['dbscan_label'] == -1]
         for _, row in anomalies.iterrows():
-            print(f"    ⚠  {row['pipeline_id']:<30} score={row['mean_score']:.2f}  "
+            print(f"    !  {row['pipeline_id']:<30} score={row['mean_score']:.2f}  "
                   f"gap={row['mean_gap']:.0f}min")
         print()
         print("  Anomalies are outside all dense clusters.")

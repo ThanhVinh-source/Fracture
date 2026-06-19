@@ -789,7 +789,7 @@ until the log extraction is fixed.
         else:
             sev = '─'
             msg = 'passes — conformance can run'
-        marker = '✓' if sev == '─' else ('✗' if sev == 'RED' else '⚠')
+        marker = 'v' if sev == '─' else ('x' if sev == 'RED' else '!')
         print(f'  {marker}  {name:<26} {sev:<10} {msg}')
 
     print()

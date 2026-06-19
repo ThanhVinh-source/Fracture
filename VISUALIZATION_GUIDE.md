@@ -87,6 +87,16 @@ Right panel  = trend over chronological runs
 Positive slope = widening handoff gap
 ```
 
+Related CSV diagnostic:
+
+```text
+gap_drift_per_day = day-level slope of bilateral_gap_minutes
+```
+
+This value is computed from historical bilateral gaps in `conformance_log.csv`
+plus the current run gap. It is useful when a gap is not just large, but getting
+worse over time.
+
 For `trade_positions_sftp`, this view should show severe handoff delay.
 
 ### `drift_chart.png`
@@ -397,4 +407,11 @@ Narrative:
 5. Predict shows whether the risk is widening.
 6. Recommend turns diagnostics into next action.
 7. Visualize/dashboard make it explainable for non-technical viewers.
+```
+
+For the complete Phase 6 script, including setup, expected findings, QA tests,
+and limitations, see:
+
+```text
+documents/FINAL_DEMO_GUIDE.md
 ```

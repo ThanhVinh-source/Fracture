@@ -11,13 +11,22 @@ Read the file. Run the file. The output is the lesson.
 
 ```bash
 # Verify everything works first
-python saturday.py
+python tests/test_e2e_saturday.py
 
 # Learn the CLI end to end
 python tests/test_cli_learning.py
 
-# Run all tests
-python TEAM_GUIDE.py --run-tests
+# Run the final high-signal demo tests
+python tests/test_phase1_core_readiness.py
+python tests/test_visualization_data_layer.py
+python tests/test_dashboard.py
+python tests/test_discovery.py
+python tests/test_performance.py
+python tests/test_comparison.py
+python tests/test_prediction.py
+python tests/test_recommendation.py
+python tests/test_cli_learning.py
+python tests/test_e2e_saturday.py
 ```
 
 ---
@@ -442,10 +451,19 @@ sample     = trade_events[trade_events['pipeline_run_id'].isin(sample_ids)]
 ## Running all tests
 
 ```bash
-# All test suites (74 assertions)
-python TEAM_GUIDE.py --run-tests
+# Final high-signal suite:
+python tests/test_phase1_core_readiness.py
+python tests/test_visualization_data_layer.py
+python tests/test_dashboard.py
+python tests/test_discovery.py
+python tests/test_performance.py
+python tests/test_comparison.py
+python tests/test_prediction.py
+python tests/test_recommendation.py
+python tests/test_cli_learning.py
+python tests/test_e2e_saturday.py
 
-# Or individually:
+# Additional regression and research scenario tests:
 python tests/test_cli_learning.py           # 7 parts, ~3 min
 python tests/test_e2e_saturday.py           # 5 scenarios
 python tests/test_optional_activities.py    # 14 tests
@@ -483,29 +501,29 @@ Every assertion message is a hint, not just a failure.
 
 | Area | Tests | Status |
 |------|-------|--------|
-| Token replay (sequence fitness) | test_e2e_saturday, test_optional_activities | ✓ |
-| Timing zones (all 6 zones) | test_hard_sla | ✓ |
-| Completeness | test_hard_sla, test_grain_level | ✓ |
-| Bilateral gap | test_e2e_saturday, test_middle_pipeline | ✓ |
-| Changepoint detection | test_analytical_extensions | ✓ |
-| Variant comparison | test_analytical_extensions, test_grain_level | ✓ |
-| Grain-completeness guard | test_grain_level | ✓ |
-| Weekday pattern (Mode 1 + 2) | test_coverage_gaps | ✓ |
-| Chain gaps (A→B→C) | test_middle_pipeline | ✓ |
-| PNML cache | test_coverage_gaps | ✓ |
-| DRAFT gate | test_cli_learning | ✓ |
-| deregister / deprecate | test_coverage_gaps, test_cli_learning | ✓ |
-| run-all team filter | test_coverage_gaps | ✓ |
-| Preflight (8 checks) | test_cli_learning | ✓ |
-| Large scale (1.5M records) | test_citi_large_dataset | ✓ |
-| Breach scenarios | test_sla_breach_scenarios | ✓ |
+| Token replay (sequence fitness) | test_e2e_saturday, test_optional_activities | v |
+| Timing zones (all 6 zones) | test_hard_sla | v |
+| Completeness | test_hard_sla, test_grain_level | v |
+| Bilateral gap | test_e2e_saturday, test_middle_pipeline | v |
+| Changepoint detection | test_analytical_extensions | v |
+| Variant comparison | test_analytical_extensions, test_grain_level | v |
+| Grain-completeness guard | test_grain_level | v |
+| Weekday pattern (Mode 1 + 2) | test_coverage_gaps | v |
+| Chain gaps (A→B→C) | test_middle_pipeline | v |
+| PNML cache | test_coverage_gaps | v |
+| DRAFT gate | test_cli_learning | v |
+| deregister / deprecate | test_coverage_gaps, test_cli_learning | v |
+| run-all team filter | test_coverage_gaps | v |
+| Preflight (8 checks) | test_cli_learning | v |
+| Large scale (1.5M records) | test_citi_large_dataset | v |
+| Breach scenarios | test_sla_breach_scenarios | v |
 
 ---
 
 ## The test that answers "does it work?"
 
 ```bash
-python saturday.py
+python tests/test_e2e_saturday.py
 ```
 
 Five E2E scenarios. Four PNG visualisations of Petri nets. If this passes, everything works.

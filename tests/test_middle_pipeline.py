@@ -167,14 +167,14 @@ def check(name, fn):
     try:
         fn()
         passed += 1
-        print(f'  ✓  {name}')
+        print(f'  v  {name}')
     except AssertionError as e:
         failed += 1
-        print(f'  ✗  {name}')
+        print(f'  x  {name}')
         print(f'       {e}')
     except Exception as e:
         failed += 1
-        print(f'  ✗  {name}: {type(e).__name__}: {e}')
+        print(f'  x  {name}: {type(e).__name__}: {e}')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -438,7 +438,7 @@ check('middle pipeline schema: all fields correct', test_schema_middle_pipeline)
 
 print()
 print("═" * 65)
-print(f"  Results: {passed+failed} tests  ✓ {passed}  ✗ {failed}")
+print(f"  Results: {passed+failed} tests  v {passed}  x {failed}")
 print("═" * 65)
 print()
 print("  WHAT THE CHAIN ARCHITECTURE ADDS:")

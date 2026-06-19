@@ -21,15 +21,15 @@ Design principles:
      silent → below 0.50. If any of these fail the formula has a bug.
 
 Scenario coverage (see formula spec for full details):
-  ✓ Hard SLA with penalty clause
-  ✓ Soft SLA internal consumer
-  ✓ Newly added process (warmup mode)
-  ✓ Legacy process (baseline mode)
-  ✓ Cascade dependency attribution
-  ✓ Intermittent failure pattern (Monday bounce)
-  ✓ Schema drift without timing violation
-  ✓ Suspicious early completion
-  ✓ Cross-fleet infrastructure pattern detection
+  v Hard SLA with penalty clause
+  v Soft SLA internal consumer
+  v Newly added process (warmup mode)
+  v Legacy process (baseline mode)
+  v Cascade dependency attribution
+  v Intermittent failure pattern (Monday bounce)
+  v Schema drift without timing violation
+  v Suspicious early completion
+  v Cross-fleet infrastructure pattern detection
 """
 
 from __future__ import annotations

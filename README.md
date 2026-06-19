@@ -63,7 +63,19 @@ python scripts/08_backfill_conformance_history.py --start-date 20260519 --end-da
 python -m fracture.cli status --pipeline-id trade_positions_sftp
 ```
 
-Run the full Phase 5 demo flow:
+Run the whole demo from one command:
+
+```bash
+python scripts/09_run_final_demo.py
+```
+
+Open the dashboard too:
+
+```bash
+python scripts/09_run_final_demo.py --with-dashboard
+```
+
+Run the final demo flow:
 
 ```bash
 python -m fracture.cli discover --pipeline-id trade_positions_sftp --date 20260618
@@ -74,6 +86,12 @@ python -m fracture.cli predict --pipeline-id trade_positions_sftp
 python -m fracture.cli recommend --pipeline-id trade_positions_sftp
 python -m fracture.cli visualize --pipeline-id trade_positions_sftp --kind all --all-dates
 python -m fracture.cli dashboard
+```
+
+For the full presentation script, see:
+
+```text
+documents/FINAL_DEMO_GUIDE.md
 ```
 
 If Streamlit port `8501` is busy:
@@ -246,6 +264,10 @@ Short interpretation:
 | `recommendations.json` | Stores owner, severity, probable cause, recommended action, and next command |
 | `fleet_heatmap.png` | Shows weekday/fleet patterns across pipelines |
 
+The `gap_drift_per_day` diagnostic in `conformance_log.csv` is computed from
+historical bilateral gaps and today's current gap. It is the day-level slope of
+the producer-consumer handoff delay, for example `+0.25 min/day`.
+
 More detail is in `VISUALIZATION_GUIDE.md`.
 
 ## Dashboard
@@ -330,6 +352,26 @@ dashboard.py          Streamlit dashboard
 tests/                Executable documentation and regression tests
 scripts/              Demo data and setup helpers
 documents/            Longer report and research notes
+```
+
+## Final Demo Checklist
+
+For final submission or presentation, use:
+
+```text
+documents/FINAL_DEMO_GUIDE.md
+```
+
+It contains:
+
+```text
+fresh setup
+demo data rebuild
+one clean command sequence
+expected findings
+dashboard narration
+final QA tests
+known limitations and future work
 ```
 
 ## Git Hygiene

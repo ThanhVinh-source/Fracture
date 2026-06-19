@@ -129,7 +129,7 @@ def write_event_files(pid: str, cfg: dict, days: int,
     try:
         prod, cons, gt = gen.generate(contract, days, start, pipeline_age, seed)
     except Exception as e:
-        print(f"    ⚠  Generator failed for {pid}: {e}")
+        print(f"    !  Generator failed for {pid}: {e}")
         return False
 
     # Write files
@@ -232,7 +232,7 @@ def main(days: int = 30, team_filter: str = None,
         # Step 1: Write event files
         result = write_event_files(pid, cfg, days, pipeline_age, seed, today)
         if result is False:
-            print(f"  ✗  {team:<26} {pid:<30} event generation failed")
+            print(f"  x  {team:<26} {pid:<30} event generation failed")
             fail_count += 1
             continue
 
@@ -247,7 +247,7 @@ def main(days: int = 30, team_filter: str = None,
             if 'already exists' in str(e).lower() or Path(f'contracts/{pid}.yaml').exists():
                 pass
             else:
-                print(f"  ✗  {team:<26} {pid:<30} register failed: {e}")
+                print(f"  x  {team:<26} {pid:<30} register failed: {e}")
                 fail_count += 1
                 continue
 
@@ -261,7 +261,7 @@ def main(days: int = 30, team_filter: str = None,
             )
             cli.cmd_bootstrap(boot_args)
         except Exception as e:
-            print(f"  ⚠  {team:<26} {pid:<30} bootstrap warning: {e}")
+            print(f"  !  {team:<26} {pid:<30} bootstrap warning: {e}")
 
         # Step 4: Activate
         try:
@@ -272,11 +272,11 @@ def main(days: int = 30, team_filter: str = None,
             )
             cli.cmd_activate(act_args)
         except Exception as e:
-            print(f"  ⚠  {team:<26} {pid:<30} activate warning: {e}")
+            print(f"  !  {team:<26} {pid:<30} activate warning: {e}")
 
         arch    = cfg['archetype']
         cons_ok = '+ consumer' if has_consumer else 'producer only'
-        print(f"  ✓  {team:<26} {pid:<30} {arch:<14} {cons_ok}")
+        print(f"  v  {team:<26} {pid:<30} {arch:<14} {cons_ok}")
         success_count += 1
 
     if dry_run:
@@ -286,9 +286,9 @@ def main(days: int = 30, team_filter: str = None,
 
     print(f"  {'─'*62}")
     print()
-    print(f"  ✓  {success_count} pipelines ready")
+    print(f"  v  {success_count} pipelines ready")
     if fail_count:
-        print(f"  ✗  {fail_count} failures")
+        print(f"  x  {fail_count} failures")
     print()
     print(f"  Next:")
     print(f"    fracture run-all          → run conformance for all teams")

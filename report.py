@@ -43,8 +43,8 @@ def score_bar(score: float, width: int = 20) -> str:
     return f"[{'█' * filled}{'░' * empty}]"
 
 def zone_icon(zone: str) -> str:
-    return {'GREEN': '✓', 'AMBER': '⚠', 'RED': '⚠',
-            'BREACH': '✗', 'SUSPICIOUS_EARLY': '?'}.get(zone, '○')
+    return {'GREEN': 'v', 'AMBER': '!', 'RED': '!',
+            'BREACH': 'x', 'SUSPICIOUS_EARLY': '?'}.get(zone, '○')
 
 def cluster_badge(cluster: str) -> str:
     return {'HEALTHY': '● HEALTHY', 'DRIFTING': '◐ DRIFTING',
@@ -139,10 +139,10 @@ def print_executive_summary(rows: list, clusters: dict):
     print(f"║  Date                : {date.today().strftime('%Y-%m-%d'):<43}║")
     print("╠" + "═" * 66 + "╣")
     print(f"║  SLA STATUS                                                    ║")
-    print(f"║    ✓  GREEN         {green:>4}   Comfortable — no action         ║")
-    print(f"║    ⚠  AMBER         {amber:>4}   Watch closely this week         ║")
-    print(f"║    ⚠  RED           {red:>4}   Act before end of day            ║")
-    print(f"║    ✗  BREACH        {breach:>4}   Immediate action required       ║")
+    print(f"║    v  GREEN         {green:>4}   Comfortable — no action         ║")
+    print(f"║    !  AMBER         {amber:>4}   Watch closely this week         ║")
+    print(f"║    !  RED           {red:>4}   Act before end of day            ║")
+    print(f"║    x  BREACH        {breach:>4}   Immediate action required       ║")
     print("╠" + "═" * 66 + "╣")
     print(f"║  PATTERNS                                                      ║")
     print(f"║    Drifting  {drifting:>4}   Score declining — breach coming         ║")
@@ -242,7 +242,7 @@ def main(csv_path: str = 'conformance_log.csv',
     # Load conformance log
     log_path = Path(csv_path)
     if not log_path.exists():
-        print(f"✗  {csv_path} not found.")
+        print(f"x  {csv_path} not found.")
         print(f"   Run: python scripts/05_generate_clustering_data.py --days 7")
         print(f"   Then: python clustering.py")
         sys.exit(1)
@@ -267,7 +267,7 @@ def main(csv_path: str = 'conformance_log.csv',
             for cr in csv.DictReader(f):
                 clusters[cr.get('cluster_name', 'UNKNOWN')].append(cr['pipeline_id'])
     else:
-        print(f"  ⚠  {cluster_path} not found.")
+        print(f"  !  {cluster_path} not found.")
         print(f"     Run: python clustering.py first for cluster labels.")
         print(f"     Continuing without cluster information.")
         print()

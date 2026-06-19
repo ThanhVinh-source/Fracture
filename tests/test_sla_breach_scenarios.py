@@ -144,10 +144,10 @@ def scenario_1_gradual_drift():
         prev_score = r.final_score
 
         zone_icon = {
-            'GREEN':  '✓',
-            'AMBER':  '⚠',
-            'RED':    '⚠',
-            'BREACH': '✗',
+            'GREEN':  'v',
+            'AMBER':  '!',
+            'RED':    '!',
+            'BREACH': 'x',
         }.get(r.timing_zone, '○')
 
         print(f"  Week {week:<3} {int(actual_p99):3d}min actual   "
@@ -296,13 +296,13 @@ def scenario_2_bilateral_breach():
 
         if consumer_buffer < 0:
             finding = f"CONSUMER BREACHED by {abs(consumer_buffer)} min"
-            icon    = "✗"
+            icon    = "x"
         elif consumer_buffer < 5:
             finding = f"consumer buffer={consumer_buffer}min — CRITICAL"
-            icon    = "⚠"
+            icon    = "!"
         else:
             finding = f"consumer buffer={consumer_buffer}min"
-            icon    = "✓"
+            icon    = "v"
 
         prod_zone = r_prod.timing_zone
         prod_score = r_prod.final_score
@@ -319,9 +319,9 @@ def scenario_2_bilateral_breach():
     print()
     print("  WHAT THIS MEANS:")
     print()
-    print("  Datadog shows: producer pipeline GREEN ✓")
-    print("  Monte Carlo:   data quality OK ✓")
-    print("  Airflow:       DAG completed on time ✓")
+    print("  Datadog shows: producer pipeline GREEN v")
+    print("  Monte Carlo:   data quality OK v")
+    print("  Airflow:       DAG completed on time v")
     print()
     print("  Fracture shows:")
     print("  Producer healthy. But bilateral gap = 43 min at week 12.")

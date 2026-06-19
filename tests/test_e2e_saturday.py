@@ -100,8 +100,8 @@ def make_contract(pipeline_id='test', criticality='high', status='active'):
 START_DATE = date.today() - timedelta(days=30)
 DAYS       = 30
 
-PASS = "✓"
-FAIL = "✗"
+PASS = "v"
+FAIL = "x"
 results = []
 
 
@@ -538,7 +538,7 @@ if __name__ == '__main__':
         print("\n  Failed:")
         for r in results:
             if r[0] == FAIL:
-                print(f"    ✗ {r[1]}")
+                print(f"    x {r[1]}")
                 if len(r) > 2:
                     print(f"      {r[2][:80]}")
         sys.exit(1)

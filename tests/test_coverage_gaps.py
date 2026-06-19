@@ -104,14 +104,14 @@ def check(name, fn):
     try:
         fn()
         passed += 1
-        print(f'  ✓  {name}')
+        print(f'  v  {name}')
     except AssertionError as e:
         failed += 1
-        print(f'  ✗  {name}')
+        print(f'  x  {name}')
         print(f'       {e}')
     except Exception as e:
         failed += 1
-        print(f'  ✗  {name}: {type(e).__name__}: {e}')
+        print(f'  x  {name}: {type(e).__name__}: {e}')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -336,7 +336,7 @@ def test_pnml_cache_deleted_forces_rebuild():
         assert pnml_path.exists(), "Should be rebuilt after deletion"
         assert net is not None, "Should return valid net after rebuild"
 
-        print(f'       delete → rebuild: ✓')
+        print(f'       delete → rebuild: v')
 
     finally:
         shutil.rmtree(cache_dir, ignore_errors=True)
@@ -626,7 +626,7 @@ def test_run_all_team_filter_isolates_pipelines():
         assert not team_b_ran, \
             f"--team team_a should not run team_b pipelines: {ran_pipelines}"
 
-        print(f'       team_b pipelines not in log: ✓')
+        print(f'       team_b pipelines not in log: v')
 
 check('run-all --team: only specified team pipelines run',
       test_run_all_team_filter_isolates_pipelines)
@@ -721,7 +721,7 @@ def test_deprecated_pipeline_skipped_in_run_all():
 
         assert 'deprecated_pipe' not in ran_pipelines, \
             "DEPRECATED pipeline should NOT appear in conformance log"
-        print(f'       deprecated_pipe not in log: ✓')
+        print(f'       deprecated_pipe not in log: v')
 
 check('run-all: deprecated pipelines are skipped',
       test_deprecated_pipeline_skipped_in_run_all)
@@ -734,7 +734,7 @@ check('run-all: deprecated pipelines are skipped',
 print()
 print('═' * 65)
 print(f'  Coverage gaps filled: {passed + failed} tests  '
-      f'✓ {passed}  ✗ {failed}')
+      f'v {passed}  x {failed}')
 print('═' * 65)
 
 if passed == passed + failed:
@@ -745,13 +745,13 @@ if passed == passed + failed:
           f'({(64+passed)/(75+passed+failed):.0%})')
     print()
     print('  What these tests prove:')
-    print('  ✓ AMBER preflight reduces confidence (not silent)')
-    print('  ✓ PNML cache written/read/rebuilt correctly')
-    print('  ✓ Mode 1 score-based weekday detection works')
-    print('  ✓ Mode 2 raw-event weekday detection works')
-    print('  ✓ deregister deletes PNML (safety guarantee proven)')
-    print('  ✓ run-all --team isolates team pipelines (RBAC foundation)')
-    print('  ✓ deprecated pipelines skipped in run-all')
+    print('  v AMBER preflight reduces confidence (not silent)')
+    print('  v PNML cache written/read/rebuilt correctly')
+    print('  v Mode 1 score-based weekday detection works')
+    print('  v Mode 2 raw-event weekday detection works')
+    print('  v deregister deletes PNML (safety guarantee proven)')
+    print('  v run-all --team isolates team pipelines (RBAC foundation)')
+    print('  v deprecated pipelines skipped in run-all')
 
 if failed > 0:
     sys.exit(1)

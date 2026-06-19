@@ -130,14 +130,14 @@ def check(name, fn):
     try:
         fn()
         passed += 1
-        print(f'  ✓  {name}')
+        print(f'  v  {name}')
     except AssertionError as e:
         failed += 1
-        print(f'  ✗  {name}')
+        print(f'  x  {name}')
         print(f'       {e}')
     except Exception as e:
         failed += 1
-        print(f'  ✗  {name}: {type(e).__name__}: {e}')
+        print(f'  x  {name}: {type(e).__name__}: {e}')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -787,7 +787,7 @@ check('missing DATA_AVAILABLE: sequence fitness < 0.95',
 
 print()
 print('═' * 65)
-print(f'  Results: {passed + failed} tests  ✓ {passed} passed  ✗ {failed} failed')
+print(f'  Results: {passed + failed} tests  v {passed} passed  x {failed} failed')
 print('═' * 65)
 
 if failed > 0:
@@ -801,12 +801,12 @@ else:
     print('  All boundary conditions behave correctly.')
     print()
     print('  What this means:')
-    print('  ✓ p99+grace+1 correctly fires BREACH (not GREEN)')
-    print('  ✓ grace=0 correctly makes any overrun a BREACH')
-    print('  ✓ One breach in 30 does not condemn a pipeline')
-    print('  ✓ 15/30 breach appropriately drops the score')
-    print('  ✓ Gap > grace correctly reported even when producer is GREEN')
-    print('  ✓ Consumer clock skew does not corrupt producer score')
-    print('  ✓ Single run gives LOW confidence (cannot be trusted)')
-    print('  ✓ Wrong event order reduces sequence fitness')
-    print('  ✓ Missing required activity reduces sequence fitness')
+    print('  v p99+grace+1 correctly fires BREACH (not GREEN)')
+    print('  v grace=0 correctly makes any overrun a BREACH')
+    print('  v One breach in 30 does not condemn a pipeline')
+    print('  v 15/30 breach appropriately drops the score')
+    print('  v Gap > grace correctly reported even when producer is GREEN')
+    print('  v Consumer clock skew does not corrupt producer score')
+    print('  v Single run gives LOW confidence (cannot be trusted)')
+    print('  v Wrong event order reduces sequence fitness')
+    print('  v Missing required activity reduces sequence fitness')

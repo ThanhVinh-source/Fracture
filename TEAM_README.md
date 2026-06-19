@@ -85,24 +85,24 @@ A token starts at `p_start`. Each activity moves the token forward. At the end t
 
 ```
 Actual log:
-  06:00  SCHEDULED  → token moves to p1  ✓
-  06:01  STARTED    → token moves to p2  ✓
-  06:47  COMPLETED  → token moves to p3  ✓
-  06:50  DATA_AVAIL → token moves to p_end ✓
+  06:00  SCHEDULED  → token moves to p1  v
+  06:01  STARTED    → token moves to p2  v
+  06:47  COMPLETED  → token moves to p3  v
+  06:50  DATA_AVAIL → token moves to p_end v
 
 Result: fitness = 1.0 (perfect)
 ```
 
 If COMPLETED never fires:
 ```
-  06:00  SCHEDULED  → p1  ✓
-  06:01  STARTED    → p2  ✓
+  06:00  SCHEDULED  → p1  v
+  06:01  STARTED    → p2  v
   [COMPLETED missing]
   06:50  DATA_AVAIL → needs p3, but token is in p2
                    → create artificial token (missing_token += 1)
                    → token stranded in p2 (remaining_token += 1)
 
-Result: fitness = 0.583  ✗
+Result: fitness = 0.583  x
 ```
 
 **Step 4: The score**
@@ -177,6 +177,30 @@ fracture/engine.py
 fracture/cli.py
   All commands: register, bootstrap, activate, run, status, explain...
   If you want to understand the full user workflow, read this.
+
+fracture/discovery.py
+  Discovers actual process variants and directly-follows graphs from logs.
+
+fracture/performance.py
+  Computes run duration, bottleneck arcs, and performance DFG exports.
+
+fracture/comparison.py
+  Compares producer vs consumer, contract vs actual, period vs period,
+  and pipeline grain vs trade grain.
+
+fracture/prediction.py
+  Deterministic score and gap trend prediction.
+
+fracture/recommendation.py
+  Converts diagnostics into owner, severity, probable cause, action,
+  and next command.
+
+fracture/visualization.py
+  Shared static PNG/JSON export helpers used by CLI and dashboard.
+
+dashboard.py
+  Streamlit dashboard for fleet overview, pipeline detail, visualizations,
+  prediction, and recommendations.
 ```
 
 ---

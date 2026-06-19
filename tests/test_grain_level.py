@@ -217,14 +217,14 @@ def check(name, fn):
     try:
         fn()
         passed += 1
-        print(f'  ✓  {name}')
+        print(f'  v  {name}')
     except AssertionError as e:
         failed += 1
-        print(f'  ✗  {name}')
+        print(f'  x  {name}')
         print(f'       {e}')
     except Exception as e:
         failed += 1
-        print(f'  ✗  {name}: {type(e).__name__}: {e}')
+        print(f'  x  {name}: {type(e).__name__}: {e}')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -476,8 +476,8 @@ def test_schema_grain_fields():
     assert lc_trade.grain == 'trade'
     assert lc_trade.parent_grain == 'payment_batch'
 
-    print(f'       grain=pipeline: ✓')
-    print(f'       grain=trade + parent_grain: ✓')
+    print(f'       grain=pipeline: v')
+    print(f'       grain=trade + parent_grain: v')
 
 check('schema: grain and parent_grain fields validated correctly',
       test_schema_grain_fields)
@@ -553,7 +553,7 @@ check('cross-grain: parent_grain set, batch GREEN, trade reveals failures',
 
 print()
 print("═" * 65)
-print(f"  Results: {passed+failed} tests  ✓ {passed}  ✗ {failed}")
+print(f"  Results: {passed+failed} tests  v {passed}  x {failed}")
 print("═" * 65)
 print()
 print("  WHAT GRAIN-LEVEL ARCHITECTURE ADDS:")
