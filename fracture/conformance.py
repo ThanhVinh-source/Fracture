@@ -261,89 +261,6 @@ class ConformanceResult:
     # Detail for investigation — not needed for alerting or clustering
     diagnostics: Optional[ConformanceDiagnostics] = None
 
-    def is_trustworthy(self) -> bool:
-        """
-        Can we act on this score?
-        Low confidence = fix the logs, not the pipeline.
-        """
-        return self.confidence >= 0.70
-
-    def needs_investigation(self) -> bool:
-        """
-        Should someone look at this pipeline today?
-        Only actionable when the score is low AND we trust the measurement.
-        """
-        return self.final_score < 0.75 and self.is_trustworthy()
-
-    def is_infrastructure_problem(self) -> bool:
-        """
-        Is the failure likely infrastructure rather than pipeline?
-        Used to route alerts to the correct team.
-        """
-        return (
-            self.weekday_pattern.infrastructure_probable or
-            self.attribution.has_upstream_failure
-        )
-
-    def alert_owner(self) -> str:
-        """
-        Which team should receive the alert?
-        This is the key question the blame game never answered clearly.
-        """
-        if self.attribution.has_upstream_failure:
-            return f"upstream-team ({self.attribution.root_cause_pipeline})"
-        elif self.weekday_pattern.infrastructure_probable:
-            return "platform-infrastructure"
-        else:
-            return "pipeline-owner"
-
-    def human_summary(self) -> str:
-        """
-        One sentence a manager can read and act on.
-        No technical jargon. No score numbers.
-        Just what happened and what to do.
-        """
-        if not self.is_trustworthy():
-            return (
-                f"Measurement unreliable — log quality insufficient "
-                f"(confidence: {self.confidence:.0%}). Fix log extraction first."
-            )
-        if self.attribution.has_upstream_failure:
-            return (
-                f"Non-conformant due to upstream failure in "
-                f"{self.attribution.root_cause_pipeline}. "
-                f"Fix upstream first — downstream will recover automatically."
-            )
-        if self.weekday_pattern.infrastructure_probable:
-            return (
-                f"Fails every {self.weekday_pattern.worst_weekday} "
-                f"({self.weekday_pattern.worst_weekday_failure_rate:.0%} rate). "
-                f"Infrastructure problem, not pipeline problem. "
-                f"Escalate to platform-infrastructure team."
-            )
-        if self.pattern == "INTERMITTENT":
-            return (
-                f"Intermittent failures masking as average drift. "
-                f"Investigate specific failure days rather than overall performance."
-            )
-        if self.timing_result.suspicious_early:
-            return (
-                f"Completed suspiciously early — possible silent failure. "
-                f"Verify record count and data completeness before trusting output."
-            )
-        if self.final_score >= 0.85:
-            return f"Healthy. No action required."
-        elif self.final_score >= 0.70:
-            return (
-                f"Drifting — {self.days_of_history} days of history shows "
-                f"declining performance. Schedule contract review."
-            )
-        else:
-            return (
-                f"Critical — conformance below acceptable threshold. "
-                f"Immediate investigation required."
-            )
-
     # ── Operational interface ──────────────────────────────────
 
     def is_trustworthy(self) -> bool:
@@ -1758,4 +1675,3 @@ def _events_to_pm4py_log(
 
 
 # ── Cross-fleet pattern detection ────────────────────────────────────────────
-
