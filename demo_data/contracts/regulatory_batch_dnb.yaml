@@ -1,0 +1,34 @@
+_pipeline_key: FRC-b1e6b70a
+consumer_team: regulatory-portal
+criticality: medium
+expected_end: 08:30
+expected_start: 06:00
+grace_minutes: 30
+log_contract:
+  activity_name_map: {}
+  consumer_required_events: []
+  consumer_terminal_event: ''
+  deduplicate_retries: false
+  downstream_consumer_event: DATA_AVAILABLE
+  downstream_producer_event: DATA_AVAILABLE
+  grain: pipeline
+  optional_activities: []
+  parent_grain: null
+  required_events:
+  - SCHEDULED
+  - STARTED
+  - COMPLETED
+  - DATA_AVAILABLE
+  source_path: inputs/regulatory_batch_dnb/
+  terminal_event: COMPLETED
+  transport: parquet
+  upstream_consumer_event: DATA_AVAILABLE
+  upstream_producer_event: DATA_AVAILABLE
+notifications: []
+owner: regulatory@bank.com
+p50_minutes: 39
+p95_minutes: 41
+p99_minutes: 42
+pipeline_id: regulatory_batch_dnb
+producer_team: regulatory-reporting
+status: active

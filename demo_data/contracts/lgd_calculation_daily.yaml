@@ -1,0 +1,34 @@
+_pipeline_key: FRC-9455f754
+consumer_team: risk-reporting
+criticality: medium
+expected_end: 08:30
+expected_start: 06:00
+grace_minutes: 30
+log_contract:
+  activity_name_map: {}
+  consumer_required_events: []
+  consumer_terminal_event: ''
+  deduplicate_retries: false
+  downstream_consumer_event: DATA_AVAILABLE
+  downstream_producer_event: DATA_AVAILABLE
+  grain: pipeline
+  optional_activities: []
+  parent_grain: null
+  required_events:
+  - SCHEDULED
+  - STARTED
+  - COMPLETED
+  - DATA_AVAILABLE
+  source_path: inputs/lgd_calculation_daily/
+  terminal_event: COMPLETED
+  transport: parquet
+  upstream_consumer_event: DATA_AVAILABLE
+  upstream_producer_event: DATA_AVAILABLE
+notifications: []
+owner: credit-risk@bank.com
+p50_minutes: 40
+p95_minutes: 43
+p99_minutes: 44
+pipeline_id: lgd_calculation_daily
+producer_team: credit-risk
+status: active

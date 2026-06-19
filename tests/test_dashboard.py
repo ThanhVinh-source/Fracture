@@ -53,6 +53,54 @@ def test_dashboard_module_imports():
     assert callable(dashboard.render_visualizations)
 
 
+def test_resolve_data_root_prefers_runtime_log():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        (tmp / "conformance_log.csv").write_text("pipeline_id,run_date\n", encoding="utf-8")
+        (tmp / "demo_data").mkdir()
+        (tmp / "demo_data" / "conformance_log.csv").write_text(
+            "pipeline_id,run_date\n",
+            encoding="utf-8",
+        )
+
+        # Local development should keep using the generated runtime files at
+        # project root when they exist.
+        assert dashboard.resolve_data_root(base_dir=tmp) == tmp
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_resolve_data_root_falls_back_to_demo_data():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        (tmp / "demo_data").mkdir()
+        (tmp / "demo_data" / "conformance_log.csv").write_text(
+            "pipeline_id,run_date\n",
+            encoding="utf-8",
+        )
+
+        # Streamlit Cloud will not have generated root runtime files, so the
+        # dashboard should automatically read the committed demo bundle.
+        assert dashboard.resolve_data_root(base_dir=tmp) == tmp / "demo_data"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_resolve_data_root_uses_explicit_override():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        explicit = tmp / "custom_data"
+
+        # FRACTURE_DATA_ROOT lets tests and hosted deployments force a specific
+        # data bundle without changing dashboard code.
+        assert dashboard.resolve_data_root(
+            explicit_root=str(explicit),
+            base_dir=tmp,
+        ) == explicit
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_format_score_handles_numbers_and_empty_values():
     # Dashboard scores come from CSV, so values may be numeric, strings, or empty.
     assert dashboard.format_score(0.9876) == "0.99"
@@ -297,6 +345,12 @@ if __name__ == "__main__":
     print("=" * 40)
 
     check("dashboard module imports", test_dashboard_module_imports)
+    check("resolve_data_root prefers runtime log",
+          test_resolve_data_root_prefers_runtime_log)
+    check("resolve_data_root falls back to demo_data",
+          test_resolve_data_root_falls_back_to_demo_data)
+    check("resolve_data_root uses explicit override",
+          test_resolve_data_root_uses_explicit_override)
     check("format_score handles numbers and empty values",
           test_format_score_handles_numbers_and_empty_values)
     check("numeric_value handles missing and bad values",

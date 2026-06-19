@@ -1,0 +1,36 @@
+_pipeline_key: FRC-ed2958aa
+consumer_team: analytics-bi
+criticality: high
+expected_end: 08:30
+expected_start: 06:00
+grace_minutes: 30
+log_contract:
+  activity_name_map: {}
+  consumer_required_events: []
+  consumer_terminal_event: ''
+  deduplicate_retries: false
+  downstream_consumer_event: DATA_AVAILABLE
+  downstream_producer_event: DATA_AVAILABLE
+  grain: pipeline
+  optional_activities: []
+  parent_grain: null
+  required_events:
+  - SCHEDULED
+  - STARTED
+  - COMPLETED
+  - DATA_AVAILABLE
+  source_path: inputs/dbt_model_runner/
+  terminal_event: COMPLETED
+  transport: parquet
+  upstream_consumer_event: DATA_AVAILABLE
+  upstream_producer_event: DATA_AVAILABLE
+notifications:
+- channel: slack
+  target: '#data-engineering-alerts'
+owner: data-eng@bank.com
+p50_minutes: 55
+p95_minutes: 61
+p99_minutes: 62
+pipeline_id: dbt_model_runner
+producer_team: data-engineering
+status: active

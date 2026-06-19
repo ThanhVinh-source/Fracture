@@ -1,0 +1,36 @@
+_pipeline_key: FRC-1f0703ba
+consumer_team: data-warehouse
+criticality: high
+expected_end: 08:30
+expected_start: 06:00
+grace_minutes: 30
+log_contract:
+  activity_name_map: {}
+  consumer_required_events: []
+  consumer_terminal_event: ''
+  deduplicate_retries: false
+  downstream_consumer_event: DATA_AVAILABLE
+  downstream_producer_event: DATA_AVAILABLE
+  grain: pipeline
+  optional_activities: []
+  parent_grain: null
+  required_events:
+  - SCHEDULED
+  - STARTED
+  - COMPLETED
+  - DATA_AVAILABLE
+  source_path: inputs/positions_sftp_ingest/
+  terminal_event: COMPLETED
+  transport: parquet
+  upstream_consumer_event: DATA_AVAILABLE
+  upstream_producer_event: DATA_AVAILABLE
+notifications:
+- channel: slack
+  target: '#market-risk-quant-alerts'
+owner: market-risk@bank.com
+p50_minutes: 56
+p95_minutes: 68
+p99_minutes: 69
+pipeline_id: positions_sftp_ingest
+producer_team: market-risk-quant
+status: active

@@ -1,0 +1,34 @@
+_pipeline_key: FRC-f1cf9f47
+consumer_team: analytics-platform
+criticality: medium
+expected_end: 08:30
+expected_start: 06:00
+grace_minutes: 30
+log_contract:
+  activity_name_map: {}
+  consumer_required_events: []
+  consumer_terminal_event: ''
+  deduplicate_retries: false
+  downstream_consumer_event: DATA_AVAILABLE
+  downstream_producer_event: DATA_AVAILABLE
+  grain: pipeline
+  optional_activities: []
+  parent_grain: null
+  required_events:
+  - SCHEDULED
+  - STARTED
+  - COMPLETED
+  - DATA_AVAILABLE
+  source_path: inputs/spark_batch_job/
+  terminal_event: COMPLETED
+  transport: parquet
+  upstream_consumer_event: DATA_AVAILABLE
+  upstream_producer_event: DATA_AVAILABLE
+notifications: []
+owner: data-eng@bank.com
+p50_minutes: 47
+p95_minutes: 52
+p99_minutes: 53
+pipeline_id: spark_batch_job
+producer_team: airflow-pipelines
+status: active

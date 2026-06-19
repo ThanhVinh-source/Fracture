@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 import json
+import os
 from pathlib import Path
 import re
 from typing import Optional
@@ -37,8 +38,44 @@ from fracture.visualization import (
 from fracture.schema import load_contract
 
 VISUALIZATION_ROOT = Path("outputs/visualizations")
-CONTRACTS_ROOT = Path("contracts")
-INPUTS_ROOT = Path("inputs")
+DEMO_DATA_ROOT = Path("demo_data")
+
+
+def resolve_data_root(
+    explicit_root: Optional[str] = None,
+    base_dir: Path = Path("."),
+) -> Path:
+    """
+    Choose the data folder used by the dashboard.
+
+    Local development keeps Fracture runtime files at the project root
+    (`conformance_log.csv`, `contracts/`, `inputs/`). Streamlit Cloud does not
+    have those generated files unless they are committed, so the dashboard falls
+    back to `demo_data/` when the root runtime log is missing.
+    """
+    if explicit_root:
+        # Environment override is useful for testing and for hosted deployments
+        # that want to pin the dashboard to a specific data bundle.
+        return Path(explicit_root).expanduser()
+
+    runtime_root = base_dir
+    demo_root = base_dir / DEMO_DATA_ROOT
+
+    if (runtime_root / "conformance_log.csv").exists():
+        return runtime_root
+
+    if (demo_root / "conformance_log.csv").exists():
+        return demo_root
+
+    # Return the normal local root so the empty-state messages still point to
+    # the standard local workflow when no data has been generated yet.
+    return runtime_root
+
+
+DATA_ROOT = resolve_data_root(os.getenv("FRACTURE_DATA_ROOT"))
+CONFORMANCE_LOG_PATH = DATA_ROOT / "conformance_log.csv"
+CONTRACTS_ROOT = DATA_ROOT / "contracts"
+INPUTS_ROOT = DATA_ROOT / "inputs"
 
 
 # Page configuration controls the browser tab title and layout width.
@@ -1622,11 +1659,12 @@ def main():
         ],
     )
 
-    conformance_df, conformance_status = load_conformance_log("conformance_log.csv")
-    contracts_df, contracts_status = load_contracts("contracts")
+    conformance_df, conformance_status = load_conformance_log(str(CONFORMANCE_LOG_PATH))
+    contracts_df, contracts_status = load_contracts(str(CONTRACTS_ROOT))
 
     st.sidebar.caption(f"Conformance: {conformance_status}")
     st.sidebar.caption(f"Contracts: {contracts_status}")
+    st.sidebar.caption(f"Data root: {DATA_ROOT}")
 
     if page == "Fleet Overview":
         render_fleet_overview(conformance_df)

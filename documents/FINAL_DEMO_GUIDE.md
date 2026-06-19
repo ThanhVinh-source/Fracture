@@ -70,7 +70,40 @@ outputs/
 
 These files are generated artifacts and are intentionally ignored by git.
 
-## 4. One Clean Demo Flow
+## 4. Prepare Streamlit Cloud Demo Data
+
+Streamlit Cloud will clone the repository, but it will not have your ignored
+local runtime files unless a share-ready snapshot is committed.
+
+Create that snapshot with:
+
+```bash
+python scripts/10_prepare_streamlit_demo_data.py --clean --pipeline-id trade_positions_sftp
+```
+
+This creates:
+
+```text
+demo_data/conformance_log.csv
+demo_data/contracts/
+demo_data/inputs/trade_positions_sftp/
+```
+
+The dashboard reads root runtime data first. If `conformance_log.csv` is missing
+at root, it automatically falls back to `demo_data/`.
+
+For Streamlit Cloud, use:
+
+```text
+Repository: ThanhVinh-source/Fracture
+Branch: ThanhVinh
+Main file path: dashboard.py
+```
+
+`packages.txt` installs the system Graphviz executable needed by Petri net PNG
+export.
+
+## 5. One Clean Demo Flow
 
 Run the whole demo flow from one command:
 
@@ -111,7 +144,7 @@ If Streamlit port `8501` is busy:
 python -m fracture.cli dashboard --port 8502
 ```
 
-## 5. What Each Command Proves
+## 6. What Each Command Proves
 
 | Command | Process mining capability | What to say in the demo |
 | --- | --- | --- |
@@ -126,7 +159,7 @@ python -m fracture.cli dashboard --port 8502
 | `visualize` | Static reporting | PNG and JSON artifacts are exported under `outputs/visualizations/`. |
 | `dashboard` | Interactive reporting | The same artifacts are available in Streamlit. |
 
-## 6. Expected Main Findings
+## 7. Expected Main Findings
 
 For `trade_positions_sftp`, the intended demo story is:
 
@@ -152,7 +185,7 @@ Recommendation:
   downstream acknowledgement.
 ```
 
-## 7. Output Artifacts
+## 8. Output Artifacts
 
 After `visualize --kind all --all-dates`, inspect:
 
@@ -172,7 +205,7 @@ outputs/visualizations/trade_positions_sftp/recommendations.json
 outputs/visualizations/fleet_heatmap.png
 ```
 
-## 8. How To Explain The Dashboard
+## 9. How To Explain The Dashboard
 
 Use the dashboard in this order:
 
@@ -205,7 +238,7 @@ Visualizations -> Fleet Heatmap
   Show weekday/fleet patterns.
 ```
 
-## 9. Final Technical QA
+## 10. Final Technical QA
 
 Run these before final submission:
 
@@ -240,7 +273,7 @@ The large dataset test is useful but slower:
 python tests/test_citi_large_dataset.py
 ```
 
-## 10. Current Limitations
+## 11. Current Limitations
 
 V1 intentionally stays local and file-based:
 

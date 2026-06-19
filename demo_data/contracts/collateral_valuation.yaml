@@ -1,0 +1,36 @@
+_pipeline_key: FRC-0cb5fb6e
+consumer_team: risk-management
+criticality: high
+expected_end: 08:30
+expected_start: 06:00
+grace_minutes: 30
+log_contract:
+  activity_name_map: {}
+  consumer_required_events: []
+  consumer_terminal_event: ''
+  deduplicate_retries: false
+  downstream_consumer_event: DATA_AVAILABLE
+  downstream_producer_event: DATA_AVAILABLE
+  grain: pipeline
+  optional_activities: []
+  parent_grain: null
+  required_events:
+  - SCHEDULED
+  - STARTED
+  - COMPLETED
+  - DATA_AVAILABLE
+  source_path: inputs/collateral_valuation/
+  terminal_event: COMPLETED
+  transport: parquet
+  upstream_consumer_event: DATA_AVAILABLE
+  upstream_producer_event: DATA_AVAILABLE
+notifications:
+- channel: slack
+  target: '#treasury-ops-alerts'
+owner: treasury@bank.com
+p50_minutes: 59
+p95_minutes: 69
+p99_minutes: 70
+pipeline_id: collateral_valuation
+producer_team: treasury-ops
+status: active

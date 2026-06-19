@@ -1,0 +1,34 @@
+_pipeline_key: FRC-94e2dc53
+consumer_team: risk-reporting
+criticality: medium
+expected_end: 08:30
+expected_start: 06:00
+grace_minutes: 30
+log_contract:
+  activity_name_map: {}
+  consumer_required_events: []
+  consumer_terminal_event: ''
+  deduplicate_retries: false
+  downstream_consumer_event: DATA_AVAILABLE
+  downstream_producer_event: DATA_AVAILABLE
+  grain: pipeline
+  optional_activities: []
+  parent_grain: null
+  required_events:
+  - SCHEDULED
+  - STARTED
+  - COMPLETED
+  - DATA_AVAILABLE
+  source_path: inputs/var_batch_processing/
+  terminal_event: COMPLETED
+  transport: parquet
+  upstream_consumer_event: DATA_AVAILABLE
+  upstream_producer_event: DATA_AVAILABLE
+notifications: []
+owner: risk-tech@bank.com
+p50_minutes: 38
+p95_minutes: 85
+p99_minutes: 91
+pipeline_id: var_batch_processing
+producer_team: risk-technology
+status: active

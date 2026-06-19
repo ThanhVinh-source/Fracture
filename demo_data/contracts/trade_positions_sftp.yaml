@@ -1,0 +1,34 @@
+_pipeline_key: FRC-3aaa93b8
+consumer_team: grid-scheduler
+criticality: medium
+expected_end: 08:30
+expected_start: 06:00
+grace_minutes: 30
+log_contract:
+  activity_name_map: {}
+  consumer_required_events: []
+  consumer_terminal_event: ''
+  deduplicate_retries: false
+  downstream_consumer_event: DATA_AVAILABLE
+  downstream_producer_event: DATA_AVAILABLE
+  grain: pipeline
+  optional_activities: []
+  parent_grain: null
+  required_events:
+  - SCHEDULED
+  - STARTED
+  - COMPLETED
+  - DATA_AVAILABLE
+  source_path: inputs/trade_positions_sftp/
+  terminal_event: COMPLETED
+  transport: parquet
+  upstream_consumer_event: DATA_AVAILABLE
+  upstream_producer_event: DATA_AVAILABLE
+notifications: []
+owner: market-risk@bank.com
+p50_minutes: 41
+p95_minutes: 43
+p99_minutes: 44
+pipeline_id: trade_positions_sftp
+producer_team: market-risk-quant
+status: active

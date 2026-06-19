@@ -35,3 +35,12 @@ pipeline_registry.csv
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Streamlit Cloud demo snapshot — intentionally committed.
+# Runtime root folders remain ignored, but demo_data is the share-ready bundle.
+!demo_data/
+!demo_data/**
+!demo_data/contracts/
+!demo_data/contracts/**
+!demo_data/inputs/
+!demo_data/inputs/**
