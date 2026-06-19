@@ -137,6 +137,37 @@ def test_load_pipeline_contract_missing_file_is_safe():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_build_event_visual_scope_tracks_single_date():
+    first_scope = dashboard.build_event_visual_scope(
+        pipeline_id="payment_batch",
+        date_str="20260616",
+        available_dates=["20260615", "20260616"],
+        use_all_event_dates=False,
+    )
+    second_scope = dashboard.build_event_visual_scope(
+        pipeline_id="payment_batch",
+        date_str="20260617",
+        available_dates=["20260615", "20260616"],
+        use_all_event_dates=False,
+    )
+
+    # Single-date mode must change scope when the user edits Input date.
+    assert first_scope != second_scope
+    assert first_scope == ("payment_batch", "single", ("20260616",))
+
+
+def test_build_event_visual_scope_tracks_all_dates():
+    scope = dashboard.build_event_visual_scope(
+        pipeline_id="payment_batch",
+        date_str="20260616",
+        available_dates=["20260615", "20260616"],
+        use_all_event_dates=True,
+    )
+
+    # All-dates mode ignores the text field and follows the available file set.
+    assert scope == ("payment_batch", "all", ("20260615", "20260616"))
+
+
 def test_load_json_artifact_missing_file_is_safe():
     tmp = Path(tempfile.mkdtemp())
     try:
@@ -235,6 +266,10 @@ if __name__ == "__main__":
           test_get_pipeline_options_falls_back_to_visualization_folders)
     check("load_pipeline_contract missing file is safe",
           test_load_pipeline_contract_missing_file_is_safe)
+    check("build_event_visual_scope tracks single date",
+          test_build_event_visual_scope_tracks_single_date)
+    check("build_event_visual_scope tracks all dates",
+          test_build_event_visual_scope_tracks_all_dates)
     check("load_json_artifact missing file is safe",
           test_load_json_artifact_missing_file_is_safe)
     check("load_json_artifact reads valid json",

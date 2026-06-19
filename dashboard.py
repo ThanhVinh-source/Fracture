@@ -916,12 +916,42 @@ def load_pipeline_contract(pipeline_id: str):
         return None, f"invalid contract: {e}"
 
 
+def build_event_visual_scope(
+    pipeline_id: str,
+    date_str: str,
+    available_dates: Optional[list[str]],
+    use_all_event_dates: bool,
+) -> tuple:
+    """
+    Build a stable key for the event-log visual input scope.
+
+    Gap, DFG, and performance charts are written to fixed file names. Without a
+    scope key, changing the sidebar date would leave the old PNG in place
+    because the dashboard only checks whether the output file exists.
+    """
+    available_dates = available_dates or []
+
+    if use_all_event_dates:
+        # In all-dates mode, any change in discovered input files should trigger
+        # a redraw because the chart represents the full event history.
+        date_scope = tuple(available_dates)
+        mode = "all"
+    else:
+        # In single-date mode, pressing Enter in the Input date field should
+        # redraw event-log charts for the selected date.
+        date_scope = (str(date_str).strip(),)
+        mode = "single"
+
+    return (pipeline_id, mode, date_scope)
+
+
 def ensure_visualizations_for_pipeline(
     pipeline_id: str,
     conformance_df: pd.DataFrame,
     date_str: str,
     available_dates: Optional[list[str]] = None,
     use_all_event_dates: bool = False,
+    event_scope_changed: bool = False,
     force: bool = False,
 ) -> list[str]:
     """
@@ -934,7 +964,7 @@ def ensure_visualizations_for_pipeline(
     statuses = []
     pipeline_dir = VISUALIZATION_ROOT / pipeline_id
     available_dates = available_dates or []
-    force_event_visuals = force or (use_all_event_dates and len(available_dates) > 1)
+    force_event_visuals = force or event_scope_changed
 
     contract, contract_status = load_pipeline_contract(pipeline_id)
 
@@ -1274,6 +1304,18 @@ def render_visualizations(conformance_df: pd.DataFrame):
             "Event-log visuals are using the single selected input date."
         )
 
+    event_visual_scope = build_event_visual_scope(
+        pipeline_id=selected_pipeline,
+        date_str=date_str,
+        available_dates=available_dates,
+        use_all_event_dates=use_all_event_dates,
+    )
+    event_visual_scope_key = f"event_visual_scope::{selected_pipeline}"
+    event_scope_changed = (
+        st.session_state.get(event_visual_scope_key) != event_visual_scope
+    )
+    st.session_state[event_visual_scope_key] = event_visual_scope
+
     force_regenerate = st.sidebar.button("Regenerate visuals")
 
     with st.spinner("Preparing visualizations..."):
@@ -1283,6 +1325,7 @@ def render_visualizations(conformance_df: pd.DataFrame):
             date_str=date_str,
             available_dates=available_dates,
             use_all_event_dates=use_all_event_dates,
+            event_scope_changed=event_scope_changed,
             force=force_regenerate,
         )
 
