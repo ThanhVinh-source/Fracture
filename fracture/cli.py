@@ -2186,6 +2186,47 @@ def cmd_compare(args):
     return 0 if result.status == "ok" else 1
 
 
+def cmd_predict(args):
+    """
+    Run deterministic predictive process mining for one pipeline.
+
+    Prediction reads conformance_log.csv because it needs repeated historical
+    score/gap measurements. It does not read one-day raw event inputs.
+    """
+    pipeline_id = _resolve_pipeline(args)
+    if not pipeline_id:
+        return 1
+
+    from fracture.prediction import format_prediction_result, predict_pipeline
+
+    print()
+    print(f"  Predicting: {pipeline_id}")
+    print(f"  Log       : {args.log_path}")
+
+    log_path = Path(args.log_path)
+    if not log_path.exists():
+        print()
+        print(f"  Cannot predict: missing {log_path}")
+        print("  Run conformance first: fracture run-all")
+        return 1
+
+    import pandas as pd
+
+    conformance_df = pd.read_csv(log_path)
+    result = predict_pipeline(
+        conformance_df=conformance_df,
+        pipeline_id=pipeline_id,
+        min_score_points=args.min_score_points,
+        min_gap_points=args.min_gap_points,
+    )
+
+    print()
+    for line in format_prediction_result(result).splitlines():
+        print(f"  {line}" if line else "")
+
+    return 0 if result.status == "ok" else 1
+
+
 def cmd_dashboard(args):
     """
     Start the local Streamlit dashboard.
@@ -2250,6 +2291,7 @@ fleet commands:
 process mining:
   fracture discover --pipeline-id X              ← discover actual variants
   fracture compare --pipeline-id X               ← compare process perspectives
+  fracture predict --pipeline-id X               ← forecast score/gap risk
 
 primary key:
   (pipeline_id, run_date) — unique per pipeline per day
@@ -2370,6 +2412,21 @@ primary key:
     p_cmp.add_argument('--log-path', default='conformance_log.csv',
                        help='Conformance log used by period comparison')
 
+    # predict
+    p_pred = sub.add_parser(
+        'predict',
+        help='Run trend-based predictive process mining'
+    )
+    p_pred.add_argument('--key', default=None,
+                        help='Pipeline key FRC-xxxxxxxx')
+    p_pred.add_argument('--pipeline-id', default=None, dest='pipeline_id')
+    p_pred.add_argument('--log-path', default='conformance_log.csv',
+                        help='Conformance log used by prediction')
+    p_pred.add_argument('--min-score-points', type=int, default=5,
+                        help='Minimum scored rows required for score prediction')
+    p_pred.add_argument('--min-gap-points', type=int, default=5,
+                        help='Minimum bilateral-gap rows required for gap prediction')
+
     # delete
     p_del = sub.add_parser('delete', help='Delete a run entry')
     p_del.add_argument('--pipeline-id', required=True, dest='pipeline_id')
@@ -2430,6 +2487,7 @@ primary key:
         'visualize': cmd_visualize,
         'discover':  cmd_discover,
         'compare':   cmd_compare,
+        'predict':   cmd_predict,
         'delete':    cmd_delete,
         'log':       cmd_log,
         'deprecate':   cmd_deprecate,
