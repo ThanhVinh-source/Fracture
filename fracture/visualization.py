@@ -312,6 +312,26 @@ def compute_bilateral_gap_points(
         columns={"timestamp": "consumer_timestamp"}
     )
 
+    # Duplicate handoff markers can happen when an extractor replays the same
+    # event file or when demo data is accidentally copied. Keep the latest
+    # handoff timestamp per run so one pipeline execution produces one timeline row.
+    producer_points["producer_timestamp"] = pd.to_datetime(
+        producer_points["producer_timestamp"], utc=True
+    )
+    consumer_points["consumer_timestamp"] = pd.to_datetime(
+        consumer_points["consumer_timestamp"], utc=True
+    )
+    producer_points = (
+        producer_points
+        .sort_values(["pipeline_run_id", "producer_timestamp"])
+        .drop_duplicates("pipeline_run_id", keep="last")
+    )
+    consumer_points = (
+        consumer_points
+        .sort_values(["pipeline_run_id", "consumer_timestamp"])
+        .drop_duplicates("pipeline_run_id", keep="last")
+    )
+
     # Inner join keeps only runs where both producer and consumer emitted the
     # handoff marker. Unmatched runs are useful later, but the first timeline
     # should show confirmed bilateral gaps only.
@@ -323,13 +343,6 @@ def compute_bilateral_gap_points(
 
     if matched.empty:
         return pd.DataFrame(), "no_matched_handoff_events"
-
-    matched["producer_timestamp"] = pd.to_datetime(
-        matched["producer_timestamp"], utc=True
-    )
-    matched["consumer_timestamp"] = pd.to_datetime(
-        matched["consumer_timestamp"], utc=True
-    )
 
     matched["gap_minutes"] = (
         matched["consumer_timestamp"] - matched["producer_timestamp"]

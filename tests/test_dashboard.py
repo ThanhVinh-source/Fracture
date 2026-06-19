@@ -92,9 +92,11 @@ def test_get_pipeline_options_prefers_conformance_history():
     })
 
     # conformance_log.csv history is the preferred pipeline selector source.
+    # Pipelines with more history come first so dashboard trend views are useful
+    # immediately when the app opens.
     assert dashboard.get_pipeline_options(df) == [
-        "a_pipeline",
         "z_pipeline",
+        "a_pipeline",
     ]
 
 

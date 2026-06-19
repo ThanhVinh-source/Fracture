@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+import re
+from typing import Optional
 
 import pandas as pd
 import streamlit as st
@@ -190,6 +192,168 @@ def render_variant_explainer(latest: pd.Series):
         st.info(explainer)
     else:
         st.caption("No variant explanation was recorded for this run.")
+
+
+def get_pipeline_history(conformance_df: pd.DataFrame, pipeline_id: str) -> pd.DataFrame:
+    """
+    Return all conformance rows for one pipeline.
+
+    Trend visuals such as the Drift Chart should use every historical row for
+    the selected pipeline, not only the input date selected for event-log charts.
+    """
+    if conformance_df.empty or "pipeline_id" not in conformance_df.columns:
+        return pd.DataFrame()
+
+    history = conformance_df[conformance_df["pipeline_id"] == pipeline_id].copy()
+
+    if "run_date" in history.columns:
+        # Sort makes metric summaries match the same chronological order as charts.
+        history = history.sort_values("run_date")
+
+    return history
+
+
+def get_history_counts(conformance_df: pd.DataFrame) -> dict[str, int]:
+    """
+    Count how many measured days each pipeline has.
+
+    The dashboard uses this to prioritize pipelines with useful trend history
+    instead of defaulting to a one-day pipeline that cannot show drift.
+    """
+    if conformance_df.empty or "pipeline_id" not in conformance_df.columns:
+        return {}
+
+    counts = conformance_df.groupby("pipeline_id").size()
+    return {str(pipeline_id): int(count) for pipeline_id, count in counts.items()}
+
+
+def get_available_input_dates(pipeline_id: str) -> list[str]:
+    """
+    Find event-log dates available under inputs/{pipeline_id}/.
+
+    Gap, DFG, and Performance visuals need producer/consumer event files such as
+    producer_20260618.parquet. This helper lets the dashboard default to a date
+    that actually exists instead of today's date when today's files are absent.
+    """
+    pipeline_input_dir = INPUTS_ROOT / pipeline_id
+
+    if not pipeline_input_dir.exists():
+        return []
+
+    dates = set()
+    for path in pipeline_input_dir.iterdir():
+        # Only producer files are required as the anchor for an input date.
+        # Consumer files are checked later by load_pipeline_events().
+        match = re.match(r"producer_(\d{8})\.(csv|parquet)$", path.name)
+        if match:
+            dates.add(match.group(1))
+
+    return sorted(dates)
+
+
+def load_pipeline_event_scope(
+    pipeline_id: str,
+    date_str: str,
+    available_dates: list[str],
+    use_all_event_dates: bool,
+) -> tuple[pd.DataFrame, Optional[pd.DataFrame], str]:
+    """
+    Load event logs for either one date or the full available date range.
+
+    Drift charts already use all rows from conformance_log.csv. Event-log charts
+    such as Bilateral Gap, DFG, and Performance need the same behavior when the
+    user wants to compare many days together.
+    """
+    if use_all_event_dates and available_dates:
+        selected_dates = available_dates
+    else:
+        selected_dates = [date_str]
+
+    producer_frames = []
+    consumer_frames = []
+    skipped = []
+
+    for input_date in selected_dates:
+        producer_df, consumer_df, status = load_pipeline_events(
+            inputs_dir=str(INPUTS_ROOT),
+            pipeline_id=pipeline_id,
+            date_str=input_date,
+        )
+
+        if producer_df.empty:
+            # Keep loading other dates; one missing day should not block a
+            # multi-day chart if enough other days are available.
+            skipped.append(f"{input_date}: {status}")
+            continue
+
+        producer_frames.append(producer_df)
+
+        if consumer_df is None:
+            skipped.append(f"{input_date}: consumer log unavailable")
+        else:
+            consumer_frames.append(consumer_df)
+
+    if not producer_frames:
+        return pd.DataFrame(), None, "missing_input: no producer events in selected date scope"
+
+    producer_all = pd.concat(producer_frames, ignore_index=True)
+    consumer_all = (
+        pd.concat(consumer_frames, ignore_index=True)
+        if consumer_frames
+        else None
+    )
+
+    scope_label = (
+        f"all available input dates ({len(selected_dates)} dates)"
+        if use_all_event_dates and available_dates
+        else f"input date {date_str}"
+    )
+
+    if skipped:
+        return producer_all, consumer_all, f"partial {scope_label}: " + "; ".join(skipped)
+
+    return producer_all, consumer_all, f"ok: {scope_label}"
+
+
+def render_visual_history_summary(
+    selected_pipeline: str,
+    conformance_df: pd.DataFrame,
+    available_input_dates: list[str],
+):
+    """
+    Explain whether the selected pipeline has enough data for multi-day charts.
+
+    This avoids a common confusion: a one-point Drift Chart is valid, but it
+    means only one conformance row exists for that pipeline.
+    """
+    history = get_pipeline_history(conformance_df, selected_pipeline)
+    history_points = len(history)
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Conformance history points", history_points)
+    col2.metric(
+        "Available input dates",
+        len(available_input_dates),
+    )
+
+    if not history.empty and "run_date" in history.columns:
+        latest_run_date = history["run_date"].iloc[-1]
+        col3.metric("Latest conformance date", str(latest_run_date)[:10])
+    else:
+        col3.metric("Latest conformance date", "n/a")
+
+    if history_points <= 1:
+        st.info(
+            "This pipeline currently has only one conformance row, so trend charts "
+            "can only show one point. Run conformance for more dates, or select a "
+            "pipeline such as trade_positions_sftp that already has multi-day history."
+        )
+    elif history_points < 5:
+        st.warning(
+            f"This pipeline has {history_points} conformance rows. The chart can show "
+            "multiple days, but trend and prediction signals are still weak until at "
+            "least 5 historical points are available."
+        )
 
 
 def render_contract_summary_cards(
@@ -498,6 +662,8 @@ def ensure_visualizations_for_pipeline(
     pipeline_id: str,
     conformance_df: pd.DataFrame,
     date_str: str,
+    available_dates: Optional[list[str]] = None,
+    use_all_event_dates: bool = False,
     force: bool = False,
 ) -> list[str]:
     """
@@ -509,6 +675,8 @@ def ensure_visualizations_for_pipeline(
     """
     statuses = []
     pipeline_dir = VISUALIZATION_ROOT / pipeline_id
+    available_dates = available_dates or []
+    force_event_visuals = force or (use_all_event_dates and len(available_dates) > 1)
 
     contract, contract_status = load_pipeline_contract(pipeline_id)
 
@@ -521,11 +689,12 @@ def ensure_visualizations_for_pipeline(
 
     gap_path = pipeline_dir / "bilateral_gap_timeline.png"
     gap_analysis_path = pipeline_dir / "bilateral_gap_analysis.png"
-    if force or not gap_path.exists() or not gap_analysis_path.exists():
-        producer_df, consumer_df, input_status = load_pipeline_events(
-            inputs_dir=str(INPUTS_ROOT),
+    if force_event_visuals or not gap_path.exists() or not gap_analysis_path.exists():
+        producer_df, consumer_df, input_status = load_pipeline_event_scope(
             pipeline_id=pipeline_id,
             date_str=date_str,
+            available_dates=available_dates,
+            use_all_event_dates=use_all_event_dates,
         )
 
         if producer_df.empty:
@@ -581,14 +750,15 @@ def ensure_visualizations_for_pipeline(
             statuses.append(f"petri: {status}" if path is None else f"petri created: {path}")
 
     dfg_path = pipeline_dir / "discovered_dfg_producer.png"
-    if force or not dfg_path.exists():
+    if force_event_visuals or not dfg_path.exists():
         if contract is None:
             statuses.append(f"dfg skipped: {contract_status}")
         else:
-            producer_df, consumer_df, input_status = load_pipeline_events(
-                inputs_dir=str(INPUTS_ROOT),
+            producer_df, consumer_df, input_status = load_pipeline_event_scope(
                 pipeline_id=pipeline_id,
                 date_str=date_str,
+                available_dates=available_dates,
+                use_all_event_dates=use_all_event_dates,
             )
 
             if producer_df.empty:
@@ -619,14 +789,15 @@ def ensure_visualizations_for_pipeline(
 
     performance_path = pipeline_dir / "performance_dfg_producer.png"
     execution_drift_path = pipeline_dir / "execution_time_drift_producer.png"
-    if force or not performance_path.exists() or not execution_drift_path.exists():
+    if force_event_visuals or not performance_path.exists() or not execution_drift_path.exists():
         if contract is None:
             statuses.append(f"performance skipped: {contract_status}")
         else:
-            producer_df, consumer_df, input_status = load_pipeline_events(
-                inputs_dir=str(INPUTS_ROOT),
+            producer_df, consumer_df, input_status = load_pipeline_event_scope(
                 pipeline_id=pipeline_id,
                 date_str=date_str,
+                available_dates=available_dates,
+                use_all_event_dates=use_all_event_dates,
             )
 
             if producer_df.empty:
@@ -705,7 +876,14 @@ def get_pipeline_options(conformance_df: pd.DataFrame) -> list[str]:
     pipelines. Folder fallback lets the page still work after static export.
     """
     if not conformance_df.empty and "pipeline_id" in conformance_df.columns:
-        pipelines = sorted(conformance_df["pipeline_id"].dropna().unique())
+        counts = get_history_counts(conformance_df)
+
+        # Put pipelines with more historical rows first so trend charts are useful
+        # immediately when the dashboard opens.
+        pipelines = sorted(
+            conformance_df["pipeline_id"].dropna().unique(),
+            key=lambda pipeline_id: (-counts.get(str(pipeline_id), 0), str(pipeline_id)),
+        )
         if pipelines:
             return pipelines
 
@@ -741,11 +919,57 @@ def render_visualizations(conformance_df: pd.DataFrame):
         pipelines,
     )
 
+    available_dates = get_available_input_dates(selected_pipeline)
+    default_input_date = (
+        available_dates[-1]
+        if available_dates
+        else date.today().strftime("%Y%m%d")
+    )
+
     date_str = st.sidebar.text_input(
         "Input date",
-        value=date.today().strftime("%Y%m%d"),
+        value=default_input_date,
         help="Used for producer/consumer input files such as producer_YYYYMMDD.parquet.",
+        key=f"visualization_input_date_{selected_pipeline}",
     )
+
+    if available_dates:
+        # Keep the date context visible because some visuals use event files,
+        # while drift uses the full conformance history.
+        st.sidebar.caption(
+            f"Available input range: {available_dates[0]} to {available_dates[-1]}"
+        )
+    else:
+        st.sidebar.caption("No input files found for this pipeline yet.")
+
+    has_multiple_input_dates = len(available_dates) > 1
+
+    use_all_event_dates = st.sidebar.checkbox(
+        "Use all input dates",
+        value=has_multiple_input_dates,
+        help=(
+            "When enabled, Bilateral Gap, DFG, and Performance visuals use every "
+            "available producer_YYYYMMDD file for the selected pipeline. When disabled, "
+            "they use only the Input date above."
+        ),
+        # If there is only one input date, toggling this cannot change the chart.
+        # Disable it so the UI does not imply a second date range exists.
+        disabled=not has_multiple_input_dates,
+    )
+
+    if use_all_event_dates and available_dates:
+        st.sidebar.caption(
+            "Event-log visuals are using the full available input range."
+        )
+    elif available_dates and not has_multiple_input_dates:
+        st.sidebar.caption(
+            "Only one input date is available. Event-log visuals already use all runs "
+            "inside that file."
+        )
+    else:
+        st.sidebar.caption(
+            "Event-log visuals are using the single selected input date."
+        )
 
     force_regenerate = st.sidebar.button("Regenerate visuals")
 
@@ -754,6 +978,8 @@ def render_visualizations(conformance_df: pd.DataFrame):
             pipeline_id=selected_pipeline,
             conformance_df=conformance_df,
             date_str=date_str,
+            available_dates=available_dates,
+            use_all_event_dates=use_all_event_dates,
             force=force_regenerate,
         )
 
@@ -763,6 +989,12 @@ def render_visualizations(conformance_df: pd.DataFrame):
         with st.expander("Generation status", expanded=False):
             for status in generation_statuses:
                 st.write(status)
+
+    render_visual_history_summary(
+        selected_pipeline=selected_pipeline,
+        conformance_df=conformance_df,
+        available_input_dates=available_dates,
+    )
 
     gap_tab, drift_tab, petri_tab, dfg_tab, performance_tab, heatmap_tab = st.tabs([
         "Bilateral Gap",

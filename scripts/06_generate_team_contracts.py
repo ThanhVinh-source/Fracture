@@ -122,7 +122,9 @@ def write_event_files(pid: str, cfg: dict, days: int,
     })
 
     gen   = get_generator(cfg)
-    start = today - timedelta(days=days)
+    # Include today's input file so the normal quickstart can run `fracture run-all`
+    # without passing --date. For days=30 this creates today plus the prior 29 days.
+    start = today - timedelta(days=days - 1)
 
     try:
         prod, cons, gt = gen.generate(contract, days, start, pipeline_age, seed)
@@ -133,16 +135,29 @@ def write_event_files(pid: str, cfg: dict, days: int,
     # Write files
     d = Path('inputs') / pid
     d.mkdir(parents=True, exist_ok=True)
-    today_str = today.strftime('%Y%m%d')
 
-    prod[['pipeline_run_id','activity','timestamp','team']].to_parquet(
-        d / f'producer_{today_str}.parquet', index=False
-    )
+    # Fracture's file convention is one producer/consumer file per input date.
+    # The generator returns all requested history in one DataFrame, so split it
+    # by the event date before writing. This keeps dashboard behavior consistent:
+    # one input date means one day's runs; all input dates means the full history.
+    prod_events = prod[['pipeline_run_id', 'activity', 'timestamp', 'team']].copy()
+    prod_events['__input_date'] = pd.to_datetime(prod_events['timestamp']).dt.strftime('%Y%m%d')
+
+    for input_date, day_events in prod_events.groupby('__input_date', sort=True):
+        day_events.drop(columns='__input_date').to_parquet(
+            d / f'producer_{input_date}.parquet',
+            index=False,
+        )
 
     if cons is not None and len(cons) > 0:
-        cons[['pipeline_run_id','activity','timestamp','team']].to_parquet(
-            d / f'consumer_{today_str}.parquet', index=False
-        )
+        cons_events = cons[['pipeline_run_id', 'activity', 'timestamp', 'team']].copy()
+        cons_events['__input_date'] = pd.to_datetime(cons_events['timestamp']).dt.strftime('%Y%m%d')
+
+        for input_date, day_events in cons_events.groupby('__input_date', sort=True):
+            day_events.drop(columns='__input_date').to_parquet(
+                d / f'consumer_{input_date}.parquet',
+                index=False,
+            )
         return True, True   # has_consumer=True
 
     return True, False      # has_consumer=False
