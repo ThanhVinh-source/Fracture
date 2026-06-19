@@ -368,13 +368,11 @@ def _compute_timing_zone(
     # A pipeline completing before p50/2 is suspicious.
     # Could be: error exit, incomplete processing, skipped steps.
     # Real performance improvements are gradual, not 50% faster overnight.
-    suspicious_early = False
     if actual_duration_minutes < (p50 * 0.50) and p50 > 10:
         if actual_record_count is not None and expected_record_count is not None:
             # Check if record count is also low — confirms silent failure
             record_ratio = actual_record_count / expected_record_count
             if record_ratio < 0.80:
-                suspicious_early = True
                 return TimingZoneResult(
                     zone='SUSPICIOUS_EARLY',
                     score=0.60,
@@ -1333,7 +1331,6 @@ def compute_conformance(
     # ── Step 2: Compute history length ────────────────────────
     days_of_history = len(historical_scores) if historical_scores else 30
     is_warmup = days_of_history < 30
-    is_baseline = getattr(contract, 'bootstrap_generated', False)
 
     # ── Step 3: Sequence fitness via PM4PY token replay ───────
     try:
@@ -1380,7 +1377,6 @@ def compute_conformance(
             duration_scores.append(zone_result.score)
 
     timing_score = round(np.mean(duration_scores), 4) if duration_scores else 0.50
-    mean_duration = round(np.mean(run_durations), 1) if run_durations else 0.0
 
     # Get the most recent timing zone for the result
     if run_durations:
