@@ -44,6 +44,7 @@ Future additions (not yet built):
 import argparse
 import csv
 import hashlib
+import json
 import sys
 import uuid
 import yaml
@@ -1784,6 +1785,61 @@ def _load_visualization_event_scope(
     return producer_all, consumer_all, f"ok: {scope}"
 
 
+def _json_default(value):
+    """
+    Convert analysis values that the standard JSON encoder cannot serialize.
+
+    Prediction/recommendation results are mostly plain dicts, but pandas/numpy
+    values can sneak in through metrics. Keeping this helper local to the CLI
+    makes JSON exports robust without changing the analytical dataclasses.
+    """
+    try:
+        import numpy as np
+        if isinstance(value, np.integer):
+            return int(value)
+        if isinstance(value, np.floating):
+            return float(value)
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+    except Exception:
+        pass
+
+    try:
+        import pandas as pd
+        if pd.isna(value):
+            return None
+        if isinstance(value, pd.Timestamp):
+            return value.isoformat()
+    except Exception:
+        pass
+
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+
+    return str(value)
+
+
+def _write_process_mining_json(result, output_dir: str, pipeline_id: str, filename: str) -> Path:
+    """
+    Persist a process-mining result next to the static visualization artifacts.
+
+    The dashboard/report layer should consume structured JSON instead of trying
+    to parse terminal text from `predict` or `recommend`.
+    """
+    pipeline_dir = Path(output_dir) / pipeline_id
+    pipeline_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = result.as_dict()
+    payload["generated_at"] = datetime.now().isoformat()
+
+    output_path = pipeline_dir / filename
+    with output_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, default=_json_default)
+        f.write("\n")
+
+    return output_path
+
+
 def cmd_visualize(args):
     """
     Export static visualization artifacts for one pipeline.
@@ -2410,6 +2466,16 @@ def cmd_predict(args):
     for line in format_prediction_result(result).splitlines():
         print(f"  {line}" if line else "")
 
+    output_path = _write_process_mining_json(
+        result=result,
+        output_dir=getattr(args, "output_dir", "outputs/visualizations"),
+        pipeline_id=pipeline_id,
+        filename="prediction.json",
+    )
+    print()
+    print("  Saved:")
+    print(f"    {output_path}")
+
     return 0 if result.status == "ok" else 1
 
 
@@ -2477,6 +2543,16 @@ def cmd_recommend(args):
     print()
     for line in format_recommendation_result(result).splitlines():
         print(f"  {line}" if line else "")
+
+    output_path = _write_process_mining_json(
+        result=result,
+        output_dir=getattr(args, "output_dir", "outputs/visualizations"),
+        pipeline_id=pipeline_id,
+        filename="recommendations.json",
+    )
+    print()
+    print("  Saved:")
+    print(f"    {output_path}")
 
     return 0 if result.status == "ok" else 1
 
@@ -2691,6 +2767,8 @@ primary key:
     p_pred.add_argument('--pipeline-id', default=None, dest='pipeline_id')
     p_pred.add_argument('--log-path', default='conformance_log.csv',
                         help='Conformance log used by prediction')
+    p_pred.add_argument('--output-dir', default='outputs/visualizations',
+                        help='Where prediction.json is written')
     p_pred.add_argument('--min-score-points', type=int, default=5,
                         help='Minimum scored rows required for score prediction')
     p_pred.add_argument('--min-gap-points', type=int, default=5,
@@ -2706,6 +2784,8 @@ primary key:
     p_rec.add_argument('--pipeline-id', default=None, dest='pipeline_id')
     p_rec.add_argument('--log-path', default='conformance_log.csv',
                        help='Conformance log used by recommendations')
+    p_rec.add_argument('--output-dir', default='outputs/visualizations',
+                       help='Where recommendations.json is written')
     p_rec.add_argument('--skip-prediction', action='store_true',
                        help='Use latest conformance only, without trend prediction')
     p_rec.add_argument('--min-score-points', type=int, default=5,

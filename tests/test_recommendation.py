@@ -12,6 +12,7 @@ from __future__ import annotations
 import shutil
 import sys
 import tempfile
+import json
 from argparse import Namespace
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta
@@ -200,6 +201,7 @@ def test_cmd_recommend_reads_conformance_log_csv():
             key=None,
             pipeline_id="payment_batch",
             log_path=str(log_path),
+            output_dir=str(tmp / "outputs" / "visualizations"),
             skip_prediction=True,
             min_score_points=5,
             min_gap_points=5,
@@ -212,6 +214,17 @@ def test_cmd_recommend_reads_conformance_log_csv():
         assert exit_code == 0
         assert "Action-Oriented Process Mining: payment_batch" in output.getvalue()
         assert "Bilateral gap is severe" in output.getvalue()
+        assert "recommendations.json" in output.getvalue()
+
+        json_path = (
+            tmp / "outputs" / "visualizations" / "payment_batch" / "recommendations.json"
+        )
+        assert json_path.exists()
+
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+        assert payload["pipeline_id"] == "payment_batch"
+        assert payload["status"] == "ok"
+        assert payload["recommendations"][0]["severity"] == "URGENT"
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

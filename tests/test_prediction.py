@@ -12,6 +12,7 @@ from __future__ import annotations
 import shutil
 import sys
 import tempfile
+import json
 from argparse import Namespace
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta
@@ -175,6 +176,7 @@ def test_cmd_predict_reads_conformance_log_csv():
             key=None,
             pipeline_id="payment_batch",
             log_path=str(log_path),
+            output_dir=str(tmp / "outputs" / "visualizations"),
             min_score_points=5,
             min_gap_points=5,
         )
@@ -186,6 +188,20 @@ def test_cmd_predict_reads_conformance_log_csv():
         assert exit_code == 0
         assert "Predictive Process Mining: payment_batch" in output.getvalue()
         assert "score_warning" in output.getvalue()
+        assert "prediction.json" in output.getvalue()
+
+        json_path = (
+            tmp / "outputs" / "visualizations" / "payment_batch" / "prediction.json"
+        )
+        assert json_path.exists()
+
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+        assert payload["pipeline_id"] == "payment_batch"
+        assert payload["status"] == "ok"
+        assert any(
+            item["prediction_type"] == "score_warning"
+            for item in payload["predictions"]
+        )
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
