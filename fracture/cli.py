@@ -1679,7 +1679,111 @@ def cmd_bootstrap_contract(pipeline_id: str, inputs_dir: str = 'inputs',
     except Exception as e:
         print(f"  bootstrap failed: {e}")
         return 1
-    
+
+
+def _available_visualization_dates(inputs_dir: str, pipeline_id: str) -> list[str]:
+    """
+    Return YYYYMMDD dates that have producer input files.
+
+    Producer files are the anchor because every event-log visualization needs
+    producer events. Consumer files are optional and handled later as
+    producer-only/partial mode.
+    """
+    pipeline_dir = Path(inputs_dir) / pipeline_id
+    if not pipeline_dir.exists():
+        return []
+
+    dates = set()
+    for path in pipeline_dir.iterdir():
+        # Accept the same file names as the ingestion layer:
+        # producer_YYYYMMDD.parquet and producer_YYYYMMDD.csv.
+        if path.suffix not in (".parquet", ".csv"):
+            continue
+        if not path.name.startswith("producer_"):
+            continue
+
+        date_part = path.stem.replace("producer_", "", 1)
+        if len(date_part) == 8 and date_part.isdigit():
+            dates.add(date_part)
+
+    return sorted(dates)
+
+
+def _load_visualization_event_scope(
+    *,
+    inputs_dir: str,
+    pipeline_id: str,
+    date_str: str | None,
+    all_dates: bool,
+    loader,
+):
+    """
+    Load event logs for one selected date or every available input date.
+
+    `fracture visualize --all-dates` should behave like the dashboard checkbox:
+    Gap, DFG, and Performance visuals use the full available event-log range,
+    while drift/heatmap still read conformance_log.csv.
+    """
+    import pandas as pd
+
+    if all_dates:
+        selected_dates = _available_visualization_dates(inputs_dir, pipeline_id)
+        if not selected_dates:
+            return (
+                pd.DataFrame(),
+                None,
+                "missing_input: no producer input files found for all-dates scope",
+            )
+    else:
+        # None keeps the existing behavior: ingestion falls back to today's file.
+        selected_dates = [date_str]
+
+    producer_frames = []
+    consumer_frames = []
+    skipped = []
+
+    for input_date in selected_dates:
+        producer_df, consumer_df, status = loader(
+            inputs_dir=inputs_dir,
+            pipeline_id=pipeline_id,
+            date_str=input_date,
+        )
+
+        if producer_df.empty:
+            # In all-dates mode, keep scanning other dates. In single-date mode,
+            # this will become the final status because no producer frames exist.
+            skipped.append(f"{input_date or 'today'}: {status}")
+            continue
+
+        producer_frames.append(producer_df)
+
+        if consumer_df is None:
+            skipped.append(f"{input_date or 'today'}: consumer log unavailable")
+        else:
+            consumer_frames.append(consumer_df)
+
+    if not producer_frames:
+        return pd.DataFrame(), None, "; ".join(skipped)
+
+    producer_all = pd.concat(producer_frames, ignore_index=True)
+    consumer_all = (
+        pd.concat(consumer_frames, ignore_index=True)
+        if consumer_frames
+        else None
+    )
+
+    scope = (
+        f"all available input dates ({len(selected_dates)} dates)"
+        if all_dates
+        else f"input date {date_str or 'today'}"
+    )
+
+    if skipped:
+        return producer_all, consumer_all, f"partial {scope}: " + "; ".join(skipped)
+
+    return producer_all, consumer_all, f"ok: {scope}"
+
+
 def cmd_visualize(args):
     """
     Export static visualization artifacts for one pipeline.
@@ -1724,7 +1828,12 @@ def cmd_visualize(args):
     print()
     print(f"  Visualizing: {pipeline_id if pipeline_id else 'fleet'}")
     print(f"  Kind       : {kind}")
-    print(f"  Date       : {args.date or 'today'}")
+    input_scope = (
+        "all available input dates"
+        if getattr(args, "all_dates", False)
+        else args.date or "today"
+    )
+    print(f"  Date       : {input_scope}")
 
     saved_paths = []
     skipped = []
@@ -1746,10 +1855,12 @@ def cmd_visualize(args):
                 print()
                 print(f"  Warning: could not read contract events, using defaults: {e}")
 
-        producer_df, consumer_df, load_status = load_pipeline_events(
+        producer_df, consumer_df, load_status = _load_visualization_event_scope(
             inputs_dir=args.inputs_dir,
             pipeline_id=pipeline_id,
             date_str=args.date,
+            all_dates=getattr(args, "all_dates", False),
+            loader=load_pipeline_events,
         )
 
         if producer_df.empty:
@@ -1848,10 +1959,12 @@ def cmd_visualize(args):
             except Exception as e:
                 skipped.append(f"dfg: could not load contract: {e}")
             else:
-                producer_df, consumer_df, load_status = load_pipeline_events(
+                producer_df, consumer_df, load_status = _load_visualization_event_scope(
                     inputs_dir=args.inputs_dir,
                     pipeline_id=pipeline_id,
                     date_str=args.date,
+                    all_dates=getattr(args, "all_dates", False),
+                    loader=load_pipeline_events,
                 )
 
                 if producer_df.empty:
@@ -1898,10 +2011,12 @@ def cmd_visualize(args):
             except Exception as e:
                 skipped.append(f"performance: could not load contract: {e}")
             else:
-                producer_df, consumer_df, load_status = load_pipeline_events(
+                producer_df, consumer_df, load_status = _load_visualization_event_scope(
                     inputs_dir=args.inputs_dir,
                     pipeline_id=pipeline_id,
                     date_str=args.date,
+                    all_dates=getattr(args, "all_dates", False),
+                    loader=load_pipeline_events,
                 )
 
                 if producer_df.empty:
@@ -2507,6 +2622,8 @@ primary key:
     p_viz.add_argument('--pipeline-id', default=None, dest='pipeline_id')
     p_viz.add_argument('--date', default=None,
                        help='YYYYMMDD input date to visualize')
+    p_viz.add_argument('--all-dates', action='store_true',
+                       help='Use every available producer input date for event-log visuals')
     p_viz.add_argument('--kind', default='gap',
                        choices=['gap', 'all', 'petri', 'drift', 'dfg', 'performance', 'heatmap'],
                        help='Visualization kind. Phase 5 implements gap, drift, heatmap, petri, dfg, and performance.')

@@ -527,6 +527,61 @@ def test_cmd_visualize_all_writes_gap_and_drift_png():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_cmd_visualize_all_dates_uses_available_input_range():
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        inputs_dir = tmp / "inputs"
+        output_dir = tmp / "outputs" / "visualizations"
+        pipeline_dir = inputs_dir / "payment_batch"
+        pipeline_dir.mkdir(parents=True)
+
+        producer_df, consumer_df = make_bilateral_gap_events()
+
+        # Write two real input dates. The command below intentionally receives a
+        # missing --date value; --all-dates should ignore that single date and use
+        # every producer_YYYYMMDD file available in the pipeline input folder.
+        producer_df.to_parquet(pipeline_dir / "producer_20260531.parquet")
+        consumer_df.to_parquet(pipeline_dir / "consumer_20260531.parquet")
+
+        producer_next = producer_df.copy()
+        consumer_next = consumer_df.copy()
+        producer_next["pipeline_run_id"] = producer_next["pipeline_run_id"] + "_next"
+        consumer_next["pipeline_run_id"] = consumer_next["pipeline_run_id"] + "_next"
+        producer_next["timestamp"] = producer_next["timestamp"] + pd.Timedelta(days=1)
+        consumer_next["timestamp"] = consumer_next["timestamp"] + pd.Timedelta(days=1)
+        producer_next.to_parquet(pipeline_dir / "producer_20260601.parquet")
+        consumer_next.to_parquet(pipeline_dir / "consumer_20260601.parquet")
+
+        args = Namespace(
+            key=None,
+            pipeline_id="payment_batch",
+            date="20990101",
+            all_dates=True,
+            kind="gap",
+            inputs_dir=str(inputs_dir),
+            contracts_dir=str(tmp / "contracts"),
+            output_dir=str(output_dir),
+        )
+
+        exit_code = cmd_visualize(args)
+
+        expected_path = (
+            output_dir / "payment_batch" / "bilateral_gap_timeline.png"
+        )
+        expected_analysis_path = (
+            output_dir / "payment_batch" / "bilateral_gap_analysis.png"
+        )
+
+        assert exit_code == 0
+        assert expected_path.exists()
+        assert expected_path.stat().st_size > 0
+        assert expected_analysis_path.exists()
+        assert expected_analysis_path.stat().st_size > 0
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_cmd_visualize_rejects_unknown_kind():
     args = Namespace(
         key=None,
@@ -1118,6 +1173,8 @@ if __name__ == "__main__":
           test_cmd_visualize_gap_writes_png_from_input_files)
     check("cmd_visualize all writes gap and drift PNGs",
           test_cmd_visualize_all_writes_gap_and_drift_png)
+    check("cmd_visualize all-dates uses available input range",
+          test_cmd_visualize_all_dates_uses_available_input_range)
     check("cmd_visualize rejects unknown kind",
           test_cmd_visualize_rejects_unknown_kind)
     check("prepare_drift_history filters pipeline score history",
