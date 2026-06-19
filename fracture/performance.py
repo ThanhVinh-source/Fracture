@@ -197,3 +197,46 @@ def build_performance_summary(
         run_duration_minutes=_duration_summary(run_durations),
         bottleneck_arc=bottleneck_arc,
     )
+
+
+def format_performance_summary(summary: PerformanceSummary) -> str:
+    """
+    Format performance-mining output for CLI use.
+
+    Keep this plain text so it is easy to paste into reports and compare with
+    the static Performance DFG visual.
+    """
+    lines = [
+        f"Performance Analysis: {summary.pipeline_id}",
+        f"Log side: {summary.log_side}",
+        f"Status: {summary.status}",
+        f"Traces: {summary.n_traces}",
+        f"Timed arcs: {summary.n_arcs}",
+    ]
+
+    if summary.run_duration_minutes:
+        lines.extend(["", "Run duration minutes:"])
+        for key, value in summary.run_duration_minutes.items():
+            lines.append(f"  {key}: {value}")
+
+    if summary.bottleneck_arc:
+        arc = summary.bottleneck_arc
+        lines.extend([
+            "",
+            "Bottleneck arc:",
+            f"  {arc['source']} -> {arc['target']}",
+            f"  mean_minutes: {arc['mean_minutes']}",
+            f"  p95_minutes: {arc['p95_minutes']}",
+            f"  count: {arc['count']}",
+        ])
+
+    if summary.arcs:
+        lines.extend(["", "Top arcs by p95 duration:"])
+        for arc in summary.arcs[:5]:
+            lines.append(
+                f"  {arc['source']} -> {arc['target']}: "
+                f"mean={arc['mean_minutes']}m, p95={arc['p95_minutes']}m, "
+                f"count={arc['count']}"
+            )
+
+    return "\n".join(lines)

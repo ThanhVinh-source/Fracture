@@ -2072,6 +2072,77 @@ def cmd_discover(args):
     return 0 if summary.status == "ok" else 1
 
 
+def cmd_performance(args):
+    """
+    Run performance process mining for one pipeline.
+
+    This command computes arc durations and bottleneck arcs from actual event
+    traces. Static PNG export remains under `fracture visualize --kind performance`.
+    """
+    pipeline_id = _resolve_pipeline(args)
+    if not pipeline_id:
+        return 1
+
+    contract_path = Path(args.contracts_dir) / f"{pipeline_id}.yaml"
+    if not contract_path.exists():
+        print()
+        print(f"  Cannot analyze performance: missing contract {contract_path}")
+        return 1
+
+    try:
+        from fracture.schema import load_contract
+        contract = load_contract(str(contract_path))
+    except Exception as e:
+        print()
+        print(f"  Cannot analyze performance: could not load contract: {e}")
+        return 1
+
+    try:
+        from fracture.ingest import load_pipeline_events
+        producer_df, consumer_df = load_pipeline_events(
+            pipeline_id=pipeline_id,
+            inputs_dir=args.inputs_dir,
+            date_str=args.date,
+        )
+    except FileNotFoundError as e:
+        print()
+        print(f"  Cannot analyze performance: missing input: {e}")
+        return 1
+    except ValueError as e:
+        print()
+        print(f"  Cannot analyze performance: invalid input: {e}")
+        return 1
+
+    from fracture.performance import (
+        build_performance_summary,
+        format_performance_summary,
+    )
+
+    print()
+    print(f"  Performance mining: {pipeline_id}")
+    print(f"  Date              : {args.date or 'today'}")
+
+    summaries = [
+        build_performance_summary(producer_df, contract, log_side="producer")
+    ]
+
+    # Consumer performance is optional. If the consumer file exists, include it
+    # in the same terminal output so handoff-side delays are easier to inspect.
+    if consumer_df is not None:
+        summaries.append(
+            build_performance_summary(consumer_df, contract, log_side="consumer")
+        )
+
+    print()
+    for index, summary in enumerate(summaries):
+        if index:
+            print()
+        for line in format_performance_summary(summary).splitlines():
+            print(f"  {line}" if line else "")
+
+    return 0 if summaries[0].status == "ok" else 1
+
+
 def cmd_compare(args):
     """
     Run comparative process mining for one pipeline.
@@ -2358,6 +2429,7 @@ fleet commands:
 
 process mining:
   fracture discover --pipeline-id X              ← discover actual variants
+  fracture performance --pipeline-id X           ← analyze process bottlenecks
   fracture compare --pipeline-id X               ← compare process perspectives
   fracture predict --pipeline-id X               ← forecast score/gap risk
   fracture recommend --pipeline-id X             ← recommend next action
@@ -2459,6 +2531,17 @@ primary key:
     p_disc.add_argument('--side', default='producer',
                         choices=['producer', 'consumer'],
                         help='Which event log side to mine')
+
+    # performance
+    p_perf = sub.add_parser(
+        'performance',
+        help='Analyze process duration and bottleneck arcs'
+    )
+    p_perf.add_argument('--key', default=None,
+                        help='Pipeline key FRC-xxxxxxxx')
+    p_perf.add_argument('--pipeline-id', default=None, dest='pipeline_id')
+    p_perf.add_argument('--date', default=None,
+                        help='YYYYMMDD input date to analyze')
 
     # compare
     p_cmp = sub.add_parser(
@@ -2572,6 +2655,7 @@ primary key:
         'status':    cmd_status,
         'visualize': cmd_visualize,
         'discover':  cmd_discover,
+        'performance': cmd_performance,
         'compare':   cmd_compare,
         'predict':   cmd_predict,
         'recommend': cmd_recommend,

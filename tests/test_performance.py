@@ -1,7 +1,7 @@
 """
 tests/test_performance.py
 
-Phase 5 Step 3 tests for Performance Analysis.
+Tests for Performance Analysis.
 
 These tests verify that Fracture can compute arc durations, run durations, and
 the slowest p95 bottleneck from actual event logs.
@@ -10,7 +10,13 @@ the slowest p95 bottleneck from actual event logs.
 from __future__ import annotations
 
 import sys
+import shutil
+import tempfile
+import yaml
+from argparse import Namespace
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +25,7 @@ if str(ROOT) not in sys.path:
 
 import pandas as pd
 
+from fracture.cli import cmd_performance
 from fracture.performance import build_performance_summary
 from fracture.schema import PipelineContract
 
@@ -157,6 +164,50 @@ def test_build_performance_summary_no_input():
     assert summary.bottleneck_arc is None
 
 
+def test_cmd_performance_reads_input_csv():
+    """
+    Verify the public CLI command is wired to the performance module.
+
+    This guards the demo command:
+    python -m fracture.cli performance --pipeline-id X --date YYYYMMDD
+    """
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        contracts_dir = tmp / "contracts"
+        inputs_dir = tmp / "inputs" / "payment_batch"
+        contracts_dir.mkdir(parents=True)
+        inputs_dir.mkdir(parents=True)
+
+        (contracts_dir / "payment_batch.yaml").write_text(
+            yaml.safe_dump(make_contract().model_dump(mode="json")),
+            encoding="utf-8",
+        )
+
+        events = make_timed_events()
+        events.to_csv(inputs_dir / "producer_20260531.csv", index=False)
+
+        args = Namespace(
+            key=None,
+            pipeline_id="payment_batch",
+            date="20260531",
+            inputs_dir=str(tmp / "inputs"),
+            contracts_dir=str(contracts_dir),
+        )
+
+        output = StringIO()
+        with redirect_stdout(output):
+            exit_code = cmd_performance(args)
+
+        text = output.getvalue()
+        assert exit_code == 0
+        assert "Performance Analysis: payment_batch" in text
+        assert "Bottleneck arc:" in text
+        assert "STARTED -> COMPLETED" in text
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     print()
     print("Phase 5 performance analysis tests")
@@ -170,6 +221,8 @@ if __name__ == "__main__":
           test_build_performance_summary_computes_run_duration)
     check("performance summary no input",
           test_build_performance_summary_no_input)
+    check("cmd_performance reads input CSV",
+          test_cmd_performance_reads_input_csv)
 
     print()
     print(f"Results: {passed + failed} tests  v {passed}  x {failed}")
