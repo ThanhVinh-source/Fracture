@@ -14,11 +14,13 @@ Design goal:
 
 from __future__ import annotations
 
+from copy import copy
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 import yaml
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -31,6 +33,30 @@ from fracture.discovery import build_directly_follows_graph
 from fracture.performance import build_performance_summary
 from fracture.schema import load_contract
 from fracture.petri import contract_to_petri_net  # Build expected Petri net from contract YAML.
+
+
+def _get_mutable_colormap(name: str):
+    """
+    Return a copy of a Matplotlib colormap that can be safely customized.
+
+    Streamlit Cloud can run a different Matplotlib version from local VSCode.
+    Newer versions prefer `matplotlib.colormaps`, while older versions often
+    use `plt.get_cmap`. This compatibility helper keeps heatmap export stable
+    across both environments.
+    """
+    try:
+        # Preferred API on newer Matplotlib versions.
+        cmap = mpl.colormaps.get_cmap(name)
+    except Exception:
+        # Fallback for older Matplotlib versions.
+        cmap = plt.get_cmap(name)
+
+    if hasattr(cmap, "copy"):
+        return cmap.copy()
+
+    # Very old Matplotlib colormap objects may not expose `.copy()`.
+    return copy(cmap)
+
 
 def ensure_visualization_dir (
         pipeline_id: Optional[str] = None,
@@ -920,7 +946,9 @@ def save_fleet_heatmap(
     fig, ax = plt.subplots(figsize=(10, fig_height))
 
     # Red-yellow-green makes low/high score status immediately readable.
-    cmap = plt.cm.get_cmap("RdYlGn").copy()
+    # Use a compatibility helper because Streamlit Cloud may run a newer
+    # Matplotlib version where `plt.cm.get_cmap` is unavailable.
+    cmap = _get_mutable_colormap("RdYlGn")
     cmap.set_bad("#e5e7eb")  # Neutral grey for missing days, not red.
 
     image = ax.imshow(
