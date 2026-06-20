@@ -16,6 +16,12 @@ outputs/visualizations/
 dashboard.py
 ```
 
+## Live Dashboard
+
+The deployed Streamlit dashboard is available here:
+
+[Fracture Dashboard](https://fracture-838pcvirnyltdbdezanmvv.streamlit.app/)
+
 ## Why This Project
 
 Traditional monitoring answers:
