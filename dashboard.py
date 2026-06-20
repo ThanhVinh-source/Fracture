@@ -1088,12 +1088,48 @@ def build_event_visual_scope(
     return (pipeline_id, mode, date_scope)
 
 
+def describe_event_scope_availability(
+    date_str: str,
+    available_dates: Optional[list[str]],
+    use_all_event_dates: bool,
+) -> tuple[bool, str]:
+    """
+    Tell whether event-log visuals can be generated for the selected scope.
+
+    Bilateral Gap, DFG, and Performance charts read producer/consumer input
+    files. If a user types a date that does not exist, the dashboard must show
+    "unavailable" instead of reusing a stale PNG from a previous valid date.
+    """
+    available_dates = available_dates or []
+    cleaned_date = str(date_str).strip()
+
+    if use_all_event_dates:
+        if available_dates:
+            return True, "Event-log visuals are using the full available input range."
+
+        return False, "Unavailable: no input dates exist for this pipeline."
+
+    if not available_dates:
+        return False, "Unavailable: no producer input files exist for this pipeline."
+
+    if cleaned_date not in available_dates:
+        return (
+            False,
+            f"Unavailable: input date {cleaned_date} has no event log. "
+            f"Available range is {available_dates[0]} to {available_dates[-1]}.",
+        )
+
+    return True, f"Event-log visuals are using input date {cleaned_date}."
+
+
 def ensure_visualizations_for_pipeline(
     pipeline_id: str,
     conformance_df: pd.DataFrame,
     date_str: str,
     available_dates: Optional[list[str]] = None,
     use_all_event_dates: bool = False,
+    event_scope_available: bool = True,
+    event_scope_status: str = "",
     event_scope_changed: bool = False,
     force: bool = False,
 ) -> list[str]:
@@ -1107,7 +1143,7 @@ def ensure_visualizations_for_pipeline(
     statuses = []
     pipeline_dir = VISUALIZATION_ROOT / pipeline_id
     available_dates = available_dates or []
-    force_event_visuals = force or event_scope_changed
+    force_event_visuals = event_scope_available and (force or event_scope_changed)
 
     contract, contract_status = load_pipeline_contract(pipeline_id)
 
@@ -1120,7 +1156,9 @@ def ensure_visualizations_for_pipeline(
 
     gap_path = pipeline_dir / "bilateral_gap_timeline.png"
     gap_analysis_path = pipeline_dir / "bilateral_gap_analysis.png"
-    if force_event_visuals or not gap_path.exists() or not gap_analysis_path.exists():
+    if not event_scope_available:
+        statuses.append(f"event-log visuals unavailable: {event_scope_status}")
+    elif force_event_visuals or not gap_path.exists() or not gap_analysis_path.exists():
         producer_df, consumer_df, input_status = load_pipeline_event_scope(
             pipeline_id=pipeline_id,
             date_str=date_str,
@@ -1181,7 +1219,7 @@ def ensure_visualizations_for_pipeline(
             statuses.append(f"petri: {status}" if path is None else f"petri created: {path}")
 
     dfg_path = pipeline_dir / "discovered_dfg_producer.png"
-    if force_event_visuals or not dfg_path.exists():
+    if event_scope_available and (force_event_visuals or not dfg_path.exists()):
         if contract is None:
             statuses.append(f"dfg skipped: {contract_status}")
         else:
@@ -1220,7 +1258,11 @@ def ensure_visualizations_for_pipeline(
 
     performance_path = pipeline_dir / "performance_dfg_producer.png"
     execution_drift_path = pipeline_dir / "execution_time_drift_producer.png"
-    if force_event_visuals or not performance_path.exists() or not execution_drift_path.exists():
+    if event_scope_available and (
+        force_event_visuals
+        or not performance_path.exists()
+        or not execution_drift_path.exists()
+    ):
         if contract is None:
             statuses.append(f"performance skipped: {contract_status}")
         else:
@@ -1433,19 +1475,18 @@ def render_visualizations(conformance_df: pd.DataFrame):
         disabled=not has_multiple_input_dates,
     )
 
-    if use_all_event_dates and available_dates:
-        st.sidebar.caption(
-            "Event-log visuals are using the full available input range."
-        )
-    elif available_dates and not has_multiple_input_dates:
-        st.sidebar.caption(
-            "Only one input date is available. Event-log visuals already use all runs "
-            "inside that file."
-        )
+    event_scope_available, event_scope_status = describe_event_scope_availability(
+        date_str=date_str,
+        available_dates=available_dates,
+        use_all_event_dates=use_all_event_dates,
+    )
+
+    if event_scope_available:
+        st.sidebar.caption(event_scope_status)
     else:
-        st.sidebar.caption(
-            "Event-log visuals are using the single selected input date."
-        )
+        # A stale PNG may exist from a previous valid date. Make the invalid
+        # date state explicit so users do not mistake old output for this date.
+        st.sidebar.error(event_scope_status)
 
     event_visual_scope = build_event_visual_scope(
         pipeline_id=selected_pipeline,
@@ -1468,6 +1509,8 @@ def render_visualizations(conformance_df: pd.DataFrame):
             date_str=date_str,
             available_dates=available_dates,
             use_all_event_dates=use_all_event_dates,
+            event_scope_available=event_scope_available,
+            event_scope_status=event_scope_status,
             event_scope_changed=event_scope_changed,
             force=force_regenerate,
         )
@@ -1496,24 +1539,28 @@ def render_visualizations(conformance_df: pd.DataFrame):
     ])
 
     with gap_tab:
-        render_visualization_image(
-            pipeline_dir / "bilateral_gap_timeline.png",
-            "Bilateral Gap Timeline",
-            "No bilateral gap timeline exported yet.",
-        )
-        render_chart_note(
-            "What this proves",
-            "orange handoff lines show how long the consumer waits after the producer publishes DATA_AVAILABLE.",
-        )
-        render_visualization_image(
-            pipeline_dir / "bilateral_gap_analysis.png",
-            "Bilateral Gap Analysis",
-            "No bilateral gap analysis exported yet.",
-        )
-        render_chart_note(
-            "How to read it",
-            "left bars show gap by run; the right trend panel shows whether the handoff delay is widening.",
-        )
+        if event_scope_available:
+            render_visualization_image(
+                pipeline_dir / "bilateral_gap_timeline.png",
+                "Bilateral Gap Timeline",
+                "No bilateral gap timeline exported yet.",
+            )
+            render_chart_note(
+                "What this proves",
+                "orange handoff lines show how long the consumer waits after the producer publishes DATA_AVAILABLE.",
+            )
+            render_visualization_image(
+                pipeline_dir / "bilateral_gap_analysis.png",
+                "Bilateral Gap Analysis",
+                "No bilateral gap analysis exported yet.",
+            )
+            render_chart_note(
+                "How to read it",
+                "left bars show gap by run; the right trend panel shows whether the handoff delay is widening.",
+            )
+        else:
+            st.subheader("Bilateral Gap Timeline")
+            st.info(event_scope_status)
 
     with drift_tab:
         st.caption(
@@ -1542,66 +1589,74 @@ def render_visualizations(conformance_df: pd.DataFrame):
         )
 
     with dfg_tab:
-        render_visualization_image(
-            pipeline_dir / "discovered_dfg_producer.png",
-            "Discovered Producer DFG",
-            "No producer DFG exported yet.",
-        )
-        render_chart_note(
-            "Producer DFG",
-            "the graph is discovered from actual producer events, not manually drawn from the contract.",
-        )
-        render_visualization_image(
-            pipeline_dir / "discovered_dfg_consumer.png",
-            "Discovered Consumer DFG",
-            "No consumer DFG exported yet.",
-        )
-        render_chart_note(
-            "Consumer DFG",
-            "differences from the producer graph reveal downstream ordering or logging behavior.",
-        )
+        if event_scope_available:
+            render_visualization_image(
+                pipeline_dir / "discovered_dfg_producer.png",
+                "Discovered Producer DFG",
+                "No producer DFG exported yet.",
+            )
+            render_chart_note(
+                "Producer DFG",
+                "the graph is discovered from actual producer events, not manually drawn from the contract.",
+            )
+            render_visualization_image(
+                pipeline_dir / "discovered_dfg_consumer.png",
+                "Discovered Consumer DFG",
+                "No consumer DFG exported yet.",
+            )
+            render_chart_note(
+                "Consumer DFG",
+                "differences from the producer graph reveal downstream ordering or logging behavior.",
+            )
+        else:
+            st.subheader("Discovered DFG")
+            st.info(event_scope_status)
 
     with performance_tab:
-        st.caption(
-            "Performance DFG labels each actual arc with count, mean duration, "
-            "and p95 duration. The highlighted arc is the slowest p95 bottleneck."
-        )
-        render_visualization_image(
-            pipeline_dir / "performance_dfg_producer.png",
-            "Producer Performance DFG",
-            "No producer Performance DFG exported yet.",
-        )
-        render_chart_note(
-            "Producer performance",
-            "arc labels show where producer-side execution time accumulates between activities.",
-        )
-        render_visualization_image(
-            pipeline_dir / "performance_dfg_consumer.png",
-            "Consumer Performance DFG",
-            "No consumer Performance DFG exported yet.",
-        )
-        render_chart_note(
-            "Consumer performance",
-            "consumer-side arcs include downstream waiting and pickup delay after producer availability.",
-        )
-        render_visualization_image(
-            pipeline_dir / "execution_time_drift_producer.png",
-            "Producer Execution Time Drift",
-            "No producer execution time drift exported yet.",
-        )
-        render_chart_note(
-            "Producer drift",
-            "the trend line shows whether producer execution duration is moving toward SLA pressure.",
-        )
-        render_visualization_image(
-            pipeline_dir / "execution_time_drift_consumer.png",
-            "Consumer Execution Time Drift",
-            "No consumer execution time drift exported yet.",
-        )
-        render_chart_note(
-            "Consumer drift",
-            "the trend line shows whether downstream pickup and processing are becoming slower.",
-        )
+        if event_scope_available:
+            st.caption(
+                "Performance DFG labels each actual arc with count, mean duration, "
+                "and p95 duration. The highlighted arc is the slowest p95 bottleneck."
+            )
+            render_visualization_image(
+                pipeline_dir / "performance_dfg_producer.png",
+                "Producer Performance DFG",
+                "No producer Performance DFG exported yet.",
+            )
+            render_chart_note(
+                "Producer performance",
+                "arc labels show where producer-side execution time accumulates between activities.",
+            )
+            render_visualization_image(
+                pipeline_dir / "performance_dfg_consumer.png",
+                "Consumer Performance DFG",
+                "No consumer Performance DFG exported yet.",
+            )
+            render_chart_note(
+                "Consumer performance",
+                "consumer-side arcs include downstream waiting and pickup delay after producer availability.",
+            )
+            render_visualization_image(
+                pipeline_dir / "execution_time_drift_producer.png",
+                "Producer Execution Time Drift",
+                "No producer execution time drift exported yet.",
+            )
+            render_chart_note(
+                "Producer drift",
+                "the trend line shows whether producer execution duration is moving toward SLA pressure.",
+            )
+            render_visualization_image(
+                pipeline_dir / "execution_time_drift_consumer.png",
+                "Consumer Execution Time Drift",
+                "No consumer execution time drift exported yet.",
+            )
+            render_chart_note(
+                "Consumer drift",
+                "the trend line shows whether downstream pickup and processing are becoming slower.",
+            )
+        else:
+            st.subheader("Performance DFG")
+            st.info(event_scope_status)
 
     with actions_tab:
         st.caption(

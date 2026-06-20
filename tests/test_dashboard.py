@@ -259,6 +259,32 @@ def test_build_event_visual_scope_tracks_all_dates():
     assert scope == ("payment_batch", "all", ("20260615", "20260616"))
 
 
+def test_describe_event_scope_availability_flags_missing_date():
+    available, message = dashboard.describe_event_scope_availability(
+        date_str="20260619",
+        available_dates=["20260617", "20260618"],
+        use_all_event_dates=False,
+    )
+
+    # A typed date with no producer_YYYYMMDD file must not reuse old PNG output.
+    assert available is False
+    assert "Unavailable" in message
+    assert "20260619" in message
+
+
+def test_describe_event_scope_availability_all_dates_is_available():
+    available, message = dashboard.describe_event_scope_availability(
+        date_str="20260619",
+        available_dates=["20260617", "20260618"],
+        use_all_event_dates=True,
+    )
+
+    # All-dates mode follows the discovered input range, so the text field is
+    # not used as a single required file date.
+    assert available is True
+    assert "full available input range" in message
+
+
 def test_load_json_artifact_missing_file_is_safe():
     tmp = Path(tempfile.mkdtemp())
     try:
@@ -373,6 +399,10 @@ if __name__ == "__main__":
           test_build_event_visual_scope_tracks_single_date)
     check("build_event_visual_scope tracks all dates",
           test_build_event_visual_scope_tracks_all_dates)
+    check("describe_event_scope_availability flags missing date",
+          test_describe_event_scope_availability_flags_missing_date)
+    check("describe_event_scope_availability all-dates is available",
+          test_describe_event_scope_availability_all_dates_is_available)
     check("load_json_artifact missing file is safe",
           test_load_json_artifact_missing_file_is_safe)
     check("load_json_artifact reads valid json",
