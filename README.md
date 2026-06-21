@@ -398,7 +398,7 @@ Commit source code and documentation, not generated local runtime data.
 For Streamlit Cloud sharing, commit the small `demo_data/` snapshot created by:
 
 ```bash
-python scripts/10_prepare_streamlit_demo_data.py --clean --pipeline-id trade_positions_sftp
+python scripts/10_prepare_streamlit_demo_data.py --clean --all-pipelines
 ```
 
 The dashboard uses local runtime data when available. If `conformance_log.csv`

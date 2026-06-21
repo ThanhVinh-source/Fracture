@@ -78,7 +78,7 @@ local runtime files unless a share-ready snapshot is committed.
 Create that snapshot with:
 
 ```bash
-python scripts/10_prepare_streamlit_demo_data.py --clean --pipeline-id trade_positions_sftp
+python scripts/10_prepare_streamlit_demo_data.py --clean --all-pipelines
 ```
 
 This creates:
@@ -86,7 +86,7 @@ This creates:
 ```text
 demo_data/conformance_log.csv
 demo_data/contracts/
-demo_data/inputs/trade_positions_sftp/
+demo_data/inputs/{pipeline_id}/
 ```
 
 The dashboard reads root runtime data first. If `conformance_log.csv` is missing

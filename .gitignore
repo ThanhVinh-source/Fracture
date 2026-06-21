@@ -4,10 +4,6 @@ conformance_log.csv
 cluster_assignments.csv
 pipeline_registry.csv
 
-# Runtime directories — created by fracture register and run
-contracts/
-inputs/
-
 # Python build artifacts
 fracture.egg-info/
 *.egg-info/
@@ -44,3 +40,5 @@ __pycache__/
 !demo_data/contracts/**
 !demo_data/inputs/
 !demo_data/inputs/**
+demo_data/.DS_Store
+demo_data/**/.DS_Store

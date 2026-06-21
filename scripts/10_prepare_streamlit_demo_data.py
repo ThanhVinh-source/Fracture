@@ -24,6 +24,23 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DEMO_PIPELINE = "trade_positions_sftp"
 
 
+def discover_input_pipelines(inputs_dir: Path) -> list[str]:
+    """
+    Return pipeline folders that have runtime input files.
+
+    The dashboard can render event-log visuals for any pipeline with producer
+    and consumer files under inputs/{pipeline_id}/.
+    """
+    if not inputs_dir.exists():
+        raise FileNotFoundError(f"Required inputs directory is missing: {inputs_dir}")
+
+    pipeline_ids = sorted(path.name for path in inputs_dir.iterdir() if path.is_dir())
+    if not pipeline_ids:
+        raise FileNotFoundError(f"No pipeline input folders found in {inputs_dir}")
+
+    return pipeline_ids
+
+
 def copy_file_if_exists(source: Path, target: Path, required: bool = False) -> bool:
     """
     Copy one runtime file into demo_data.
@@ -156,7 +173,8 @@ def parse_args() -> argparse.Namespace:
     Parse CLI options for demo bundle creation.
 
     Defaults target the strongest demo pipeline because it has multi-day
-    conformance history and producer/consumer input files.
+    conformance history and producer/consumer input files. Use --all-pipelines
+    to make demo_data/inputs mirror every local pipeline input folder.
     """
     parser = argparse.ArgumentParser(
         description="Prepare demo_data/ for Streamlit Cloud deployment.",
@@ -169,6 +187,11 @@ def parse_args() -> argparse.Namespace:
             "Pipeline whose input files should be copied. Can be used multiple "
             "times. Defaults to trade_positions_sftp."
         ),
+    )
+    parser.add_argument(
+        "--all-pipelines",
+        action="store_true",
+        help="Copy input files for every pipeline folder under inputs/.",
     )
     parser.add_argument(
         "--output-dir",
@@ -185,7 +208,10 @@ def parse_args() -> argparse.Namespace:
 
 def main():
     args = parse_args()
-    pipeline_ids = args.pipeline_id or [DEFAULT_DEMO_PIPELINE]
+    if args.all_pipelines:
+        pipeline_ids = discover_input_pipelines(ROOT / "inputs")
+    else:
+        pipeline_ids = args.pipeline_id or [DEFAULT_DEMO_PIPELINE]
 
     output_dir = prepare_demo_data(
         output_dir=ROOT / args.output_dir,
